@@ -64,6 +64,21 @@ class BlenderMCPClient:
         """获取场景信息"""
         return self.send_command("get_scene_info")
     
+    def get_object_name(self, response):
+        """从响应中获取对象名称，处理不同的响应格式"""
+        if response and "result" in response and isinstance(response["result"], dict) and "name" in response["result"]:
+            return response["result"]["name"]
+        elif response and "name" in response:
+            return response["name"]
+        elif response and isinstance(response, dict) and "status" == "success" and "result" in response and "name" in response["result"]:
+            return response["result"]["name"]
+        else:
+            # 对于没有name的情况，尝试从其他字段获取
+            if response and "result" in response and isinstance(response["result"], dict) and "object" in response["result"]:
+                return response["result"]["object"]
+            else:
+                return None
+    
     def create_object(self, object_type, name=None, location=None, rotation=None, scale=None):
         """创建一个新对象"""
         params = {"type": object_type}
@@ -76,7 +91,23 @@ class BlenderMCPClient:
         if scale:
             params["scale"] = scale
         
-        return self.send_command("create_object", params)
+        # 需要特殊处理，因为服务器端API需要以type作为参数名而不是在params中
+        response = self.send_command("create_object", params)
+        
+        # 检查响应并尝试提取更完整信息
+        if "status" in response and response["status"] == "success" and "result" not in response:
+            # 如果成功但没有result字段，尝试使用name参数
+            if name:
+                # 尝试获取刚创建的对象信息
+                time.sleep(0.1)  # 短暂等待以确保对象创建完成
+                obj_info = self.send_command("get_object_info", {"name": name})
+                if "status" in obj_info and obj_info["status"] == "success":
+                    response["result"] = obj_info["result"]
+                else:
+                    # 如果无法获取详细信息，至少提供名称
+                    response["result"] = {"name": name}
+        
+        return response
     
     def modify_object(self, name, location=None, rotation=None, scale=None, visible=None):
         """修改对象属性"""
@@ -95,6 +126,19 @@ class BlenderMCPClient:
     def delete_object(self, name):
         """删除对象"""
         return self.send_command("delete_object", {"name": name})
+    
+    def join_objects(self, objects, target_object):
+        """合并多个对象"""
+        if not objects or len(objects) < 2:
+            return {"status": "error", "message": "至少需要两个对象才能合并"}
+            
+        if not target_object:
+            return {"status": "error", "message": "必须指定目标对象"}
+            
+        return self.send_command("join_objects", {
+            "objects": objects,
+            "target_object": target_object
+        })
     
     def extrude_faces(self, object_name, face_indices, direction=None, distance=1.0):
         """挤出指定面"""
@@ -168,17 +212,21 @@ if __name__ == "__main__":
             cube = client.create_object("CUBE", name="测试立方体", location=[0, 0, 0])
             print("创建立方体:", cube)
             
+            # 获取对象名称
+            cube_name = client.get_object_name(cube) or "测试立方体"
+            
             # 创建一个球体并设置材质
             sphere = client.create_object("SPHERE", name="测试球体", location=[3, 0, 0])
-            client.set_material(sphere["result"]["name"], color=[1.0, 0.0, 0.0])
+            sphere_name = client.get_object_name(sphere) or "测试球体"
+            client.set_material(sphere_name, color=[1.0, 0.0, 0.0])
             print("创建球体:", sphere)
             
             # 移动立方体
-            client.modify_object(cube["result"]["name"], location=[0, 0, 2])
+            client.modify_object(cube_name, location=[0, 0, 2])
             print("移动立方体")
             
             # 挤出立方体的顶面
-            client.extrude_faces(cube["result"]["name"], [5], direction=[0, 0, 1], distance=1.5)
+            client.extrude_faces(cube_name, [5], direction=[0, 0, 1], distance=1.5)
             print("挤出立方体顶面")
             
             # 添加文本

@@ -10,6 +10,16 @@ BlenderMCP connects Blender to Claude AI through the Model Context Protocol (MCP
 - **Scene inspection**: Get detailed information about the current Blender scene
 - **Code execution**: Run arbitrary Python code in Blender from Claude
 
+## Documentation
+
+BlenderMCP提供了全面的文档，帮助您充分利用此集成：
+
+- [API参考文档](docs/API_REFERENCE.md): 详细的API命令参考，包括每个命令的参数和响应格式
+- [示例集](docs/examples.md): 各种API使用示例，包括基本操作和复杂场景创建
+- [错误处理指南](docs/ERROR_HANDLING.md): 常见错误的处理最佳实践和故障排除指南
+
+建议先阅读错误处理指南，了解如何编写健壮的BlenderMCP脚本，尤其是在处理对象创建和合并操作时。
+
 ## Components
 
 The system consists of two main components:

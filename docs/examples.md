@@ -27,7 +27,165 @@
 // ...existing code...
 
 ## 高级照明
-// ...existing code...
+
+### 基本照明示例
+
+```python
+# 添加基本点光源
+client.send_command("create_object", {
+    "type": "LIGHT", 
+    "name": "点光源1", 
+    "location": [0, 0, 5]
+})
+client.send_command("set_light_type", {
+    "name": "点光源1", 
+    "light_type": "POINT"
+})
+client.send_command("set_light_energy", {
+    "name": "点光源1", 
+    "energy": 1000
+})
+
+# 使用高级照明API
+client.send_command("advanced_lighting", {
+    "name": "太阳光",
+    "light_type": "SUN", 
+    "location": [10, -10, 10],
+    "energy": 2.0,
+    "color": [1.0, 0.95, 0.8]
+})
+
+# 区域光照
+client.send_command("advanced_lighting", {
+    "name": "区域光1",
+    "light_type": "AREA",  # 必须指定灯光类型
+    "location": [0, 0, 5], 
+    "energy": 50,
+    "color": [1.0, 0.95, 0.9]
+})
+
+# 添加聚光灯
+client.send_command("advanced_lighting", {
+    "name": "聚光灯1",
+    "light_type": "SPOT",
+    "location": [5, 5, 5],
+    "energy": 1000,
+    "color": [0.9, 0.9, 1.0]
+})
+```
+
+## 错误处理最佳实践
+
+### 基本错误检查示例
+
+```python
+# 创建物体并检查错误
+response = client.send_command("create_object", {
+    "type": "CUBE", 
+    "name": "测试立方体", 
+    "location": [0, 0, 0]
+})
+
+if response.get("status") == "error":
+    print(f"创建对象失败: {response.get('message', '未知错误')}")
+else:
+    print(f"成功创建对象: {response['result']['name']}")
+```
+
+### 对象名称提取助手函数
+
+```python
+def get_object_name(response):
+    """从响应中获取对象名称，处理不同的响应格式"""
+    if response is None:
+        print("警告: 响应为None")
+        return None
+        
+    if isinstance(response, dict):
+        # 检查错误状态
+        if "status" in response and response["status"] == "error":
+            print(f"错误响应: {response.get('message', '未知错误')}")
+            return None
+            
+        # 检查不同格式的响应
+        if "result" in response and isinstance(response["result"], dict):
+            if "name" in response["result"]:
+                return response["result"]["name"]
+            if "object" in response["result"]:
+                return response["result"]["object"]
+                
+        # 直接在响应中查找名称
+        if "name" in response:
+            return response["name"]
+    
+    print(f"无法从响应中提取对象名称")
+    return None
+
+# 使用此函数
+cube_response = client.create_object("CUBE", name="测试立方体")
+cube_name = get_object_name(cube_response)
+if cube_name:
+    print(f"创建的立方体名称: {cube_name}")
+else:
+    print("无法创建立方体")
+```
+
+### 对象存在性验证
+
+```python
+# 创建对象
+cube_response = client.create_object("CUBE", name="验证立方体")
+cube_name = get_object_name(cube_response)
+
+if not cube_name:
+    print("创建立方体失败")
+    return
+
+# 验证对象是否真的存在于场景中
+verify_response = client.send_command("get_object_info", {"name": cube_name})
+if "status" not in verify_response or verify_response["status"] != "success":
+    print(f"警告: 立方体 {cube_name} 可能不存在于场景中")
+    return
+
+# 继续执行需要此对象的操作
+client.set_material(cube_name, color=[1, 0, 0])
+```
+
+### 重试机制示例
+
+```python
+import time
+
+# 实现创建对象的重试逻辑
+def create_object_with_retry(client, obj_type, name, location=None, max_retries=3):
+    """尝试创建对象，失败时重试"""
+    params = {"type": obj_type, "name": name}
+    if location:
+        params["location"] = location
+        
+    for attempt in range(max_retries):
+        response = client.send_command("create_object", params)
+        obj_name = get_object_name(response)
+        
+        if obj_name:
+            # 验证对象是否真的存在
+            verify = client.send_command("get_object_info", {"name": obj_name})
+            if verify.get("status") == "success":
+                print(f"成功创建对象: {obj_name} (尝试 {attempt+1})")
+                return obj_name
+                
+        print(f"尝试 {attempt+1}/{max_retries} 失败，正在重试...")
+        time.sleep(0.5)  # 短暂等待后重试
+        
+    print(f"无法创建 {obj_type} 对象，已达到最大重试次数")
+    return None
+
+# 使用此函数
+cube_name = create_object_with_retry(client, "CUBE", "重试立方体", [0, 0, 0])
+if cube_name:
+    # 继续操作...
+    pass
+```
 
 ## 复杂项目示例
 
@@ -687,4 +845,185 @@ client.send_command("render_scene", {
 })
 
 print("精细花瓶模型已完成！")
+```
+
+### 健壮的国际象棋示例 (带错误处理)
+
+```python
+import sys
+import os
+import json
+import socket
+import time
+import traceback
+
+# 导入客户端类
+from blender_mcp.client import BlenderMCPClient
+
+# 设置调试级别
+DEBUG = True
+
+def debug_print(message):
+    """调试信息输出函数"""
+    if DEBUG:
+        print(f"[DEBUG] {message}")
+
+def check_response(response, operation_name):
+    """检查响应状态，如有错误则打印"""
+    if not response:
+        print(f"警告: {operation_name} - 响应为空")
+        return False
+    
+    if isinstance(response, dict):
+        if "error" in response:
+            print(f"错误: {operation_name} - {response['error']}")
+            return False
+        
+        if "status" in response and response["status"] == "error":
+            print(f"错误: {operation_name} - {response.get('message', '未知错误')}")
+            return False
+    
+    debug_print(f"{operation_name} - 成功")
+    return True
+
+def get_object_name(response):
+    """从响应中获取对象名称，处理不同的响应格式"""
+    if response is None:
+        debug_print("警告: 响应为None")
+        return None
+        
+    debug_print(f"响应类型: {type(response)}")
+    
+    if isinstance(response, dict):
+        if "status" in response and response["status"] == "error":
+            debug_print(f"错误响应: {response.get('message', '未知错误')}")
+            return None
+            
+        if "result" in response and isinstance(response["result"], dict):
+            if "name" in response["result"]:
+                return response["result"]["name"]
+            if "object" in response["result"]:
+                return response["result"]["object"]
+                
+        if "name" in response:
+            return response["name"]
+    
+    debug_print("无法从响应中提取对象名称")
+    return None
+
+def create_object_with_retry(client, obj_type, name, location, scale=None, max_retries=3):
+    """创建对象并在失败时重试"""
+    params = {"type": obj_type, "name": name, "location": location}
+    if scale:
+        params["scale"] = scale
+        
+    for attempt in range(max_retries):
+        response = client.send_command("create_object", params)
+        obj_name = get_object_name(response)
+        
+        if obj_name:
+            # 验证对象是否真的存在
+            verify = client.send_command("get_object_info", {"name": obj_name})
+            if verify.get("status") == "success":
+                debug_print(f"成功创建对象: {obj_name} (尝试 {attempt+1})")
+                return obj_name
+        
+        debug_print(f"创建 {name} 尝试 {attempt+1}/{max_retries} 失败，正在重试...")
+        time.sleep(0.5)  # 短暂等待后重试
+    
+    debug_print(f"无法创建 {name}，已达到最大重试次数")
+    return None
+
+def create_chess_set():
+    """创建国际象棋棋盘和棋子（健壮版本）"""
+    # 创建客户端
+    client = BlenderMCPClient()
+    if not client.connect():
+        print("无法连接到BlenderMCP服务器")
+        return
+        
+    try:
+        # 测试服务器连接
+        ping_response = client.ping()
+        debug_print(f"服务器Ping响应: {ping_response}")
+        
+        # 1. 创建棋盘底座
+        debug_print("创建棋盘底座...")
+        board_name = create_object_with_retry(
+            client, "CUBE", "棋盘", [0, 0, 0], [4, 4, 0.2]
+        )
+        
+        if not board_name:
+            print("错误: 棋盘创建失败，无法继续")
+            return
+            
+        # 为棋盘设置棕色材质
+        client.set_material(board_name, color=[0.4, 0.2, 0.1])
+        
+        # 2. 创建64个棋盘格子
+        squares = []
+        for row in range(8):
+            for col in range(8):
+                # 计算位置
+                x = (col - 3.5) * 0.8
+                y = (row - 3.5) * 0.8
+                z = 0.2  # 放在棋盘表面
+                
+                # 确定颜色（交替的黑白格子）
+                is_white = (row + col) % 2 == 0
+                color = [0.9, 0.9, 0.9] if is_white else [0.1, 0.1, 0.1]
+                
+                # 创建棋盘格
+                square_name = create_object_with_retry(
+                    client, "CUBE", f"格子_{row}_{col}", [x, y, z], [0.4, 0.4, 0.02]
+                )
+                
+                if square_name:
+                    # 设置材质
+                    client.set_material(square_name, color=color)
+                    squares.append(square_name)
+        
+        if len(squares) < 64:
+            print(f"警告: 只创建了 {len(squares)}/64 个棋盘格子")
+            
+        # 3. 添加灯光
+        debug_print("设置场景灯光...")
+        
+        # 添加日光以提供整体照明
+        sun_name = create_object_with_retry(
+            client, "LIGHT", "Sun", [5, 5, 10]
+        )
+        
+        if sun_name:
+            # 设置灯光类型和能量
+            client.send_command("set_light_type", {"name": sun_name, "light_type": "SUN"})
+            client.send_command("set_light_energy", {"name": sun_name, "energy": 3.0})
+        
+        # 添加高级区域光照
+        debug_print("创建区域光照...")
+        area_light = client.send_command("advanced_lighting", {
+            "name": "Chess_Light",
+            "light_type": "AREA",  # 必须指定灯光类型
+            "location": [0, 0, 5],
+            "energy": 50,
+            "color": [1.0, 0.95, 0.9]
+        })
+        
+        # 4. 渲染场景
+        debug_print("渲染最终场景...")
+        render_result = client.render_scene(resolution_x=1920, resolution_y=1080)
+        if check_response(render_result, "渲染场景"):
+            print("国际象棋场景创建并渲染成功！")
+        else:
+            print("场景渲染失败，但棋盘和棋子可能已创建成功。")
+        
+    except Exception as e:
+        print(f"发生错误: {str(e)}")
+        traceback.print_exc()
+    finally:
+        # 断开连接
+        client.disconnect()
+
+if __name__ == "__main__":
+    create_chess_set()
 ```

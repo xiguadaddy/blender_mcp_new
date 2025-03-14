@@ -7,6 +7,8 @@ from bpy.props import StringProperty, IntProperty
 import bmesh
 import mathutils
 from math import radians
+import math
+import traceback
 
 bl_info = {
     "name": "Blender MCP",
@@ -155,7 +157,7 @@ class BlenderMCPServer:
             "ping": lambda **kwargs: {"pong": True},
             "get_simple_info": self.get_simple_info,
             "get_scene_info": self.get_scene_info,
-            "create_object": self.create_object,
+            "create_object": lambda **kwargs: self.create_object(**kwargs),
             "modify_object": self.modify_object,
             "delete_object": self.delete_object,
             "get_object_info": self.get_object_info,
@@ -238,47 +240,101 @@ class BlenderMCPServer:
             traceback.print_exc()
             return {"error": str(e)}
     
-    def create_object(self, type="CUBE", name=None, location=(0, 0, 0), rotation=(0, 0, 0), scale=(1, 1, 1)):
-        """Create a new object in the scene"""
-        # Deselect all objects
-        bpy.ops.object.select_all(action='DESELECT')
+    def create_object(self, type="CUBE", name=None, location=None, rotation=None, scale=None):
+        """创建一个指定类型的对象
         
-        # Create the object based on type
-        if type == "CUBE":
-            bpy.ops.mesh.primitive_cube_add(location=location, rotation=rotation, scale=scale)
-        elif type == "SPHERE":
-            bpy.ops.mesh.primitive_uv_sphere_add(location=location, rotation=rotation, scale=scale)
-        elif type == "CYLINDER":
-            bpy.ops.mesh.primitive_cylinder_add(location=location, rotation=rotation, scale=scale)
-        elif type == "PLANE":
-            bpy.ops.mesh.primitive_plane_add(location=location, rotation=rotation, scale=scale)
-        elif type == "CONE":
-            bpy.ops.mesh.primitive_cone_add(location=location, rotation=rotation, scale=scale)
-        elif type == "TORUS":
-            bpy.ops.mesh.primitive_torus_add(location=location, rotation=rotation, scale=scale)
-        elif type == "EMPTY":
-            bpy.ops.object.empty_add(location=location, rotation=rotation, scale=scale)
-        elif type == "CAMERA":
-            bpy.ops.object.camera_add(location=location, rotation=rotation)
-        elif type == "LIGHT":
-            bpy.ops.object.light_add(type='POINT', location=location, rotation=rotation, scale=scale)
-        else:
-            raise ValueError(f"Unsupported object type: {type}")
+        参数:
+            type: 对象类型（CUBE, SPHERE, CYLINDER, PLANE, CONE, TORUS, EMPTY等）
+            name: 可选，对象名称
+            location: 可选，[x, y, z]位置坐标
+            rotation: 可选，[x, y, z]旋转（弧度）
+            scale: 可选，[x, y, z]缩放因子
+        """
+        try:
+            # 取消选择所有对象
+            bpy.ops.object.select_all(action='DESELECT')
+            
+            # 设置默认值
+            loc = location or (0, 0, 0)
+            rot = rotation or (0, 0, 0)
+            scl = scale or (1, 1, 1)
+            
+            # 根据类型创建对象
+            if type == "EMPTY":
+                bpy.ops.object.empty_add(location=loc)
+                expected_type = "EMPTY"
+            elif type == "CAMERA":
+                bpy.ops.object.camera_add(location=loc, rotation=rot)
+                expected_type = "CAMERA"
+            elif type == "LIGHT":
+                bpy.ops.object.light_add(type='POINT', location=loc, rotation=rot)
+                expected_type = "LIGHT"
+            elif type == "CUBE":
+                bpy.ops.mesh.primitive_cube_add(location=loc, rotation=rot, scale=scl)
+                expected_type = "MESH"
+            elif type == "SPHERE":
+                bpy.ops.mesh.primitive_uv_sphere_add(location=loc, rotation=rot, scale=scl)
+                expected_type = "MESH"
+            elif type == "CYLINDER":
+                bpy.ops.mesh.primitive_cylinder_add(location=loc, rotation=rot, scale=scl)
+                expected_type = "MESH"
+            elif type == "PLANE":
+                bpy.ops.mesh.primitive_plane_add(location=loc, rotation=rot, scale=scl)
+                expected_type = "MESH"
+            elif type == "CONE":
+                bpy.ops.mesh.primitive_cone_add(location=loc, rotation=rot, scale=scl)
+                expected_type = "MESH"
+            elif type == "TORUS":
+                bpy.ops.mesh.primitive_torus_add(location=loc, rotation=rot, scale=scl)
+                expected_type = "MESH"
+            else:
+                return {"error": f"不支持的对象类型: {type}"}
+                
+            # 获取创建的对象
+            obj = bpy.context.active_object
+            
+            # 验证对象类型
+            if obj.type != expected_type:
+                print(f"警告: 创建的对象类型 {obj.type} 与预期的 {expected_type} 不符")
+                # 如果是关键对象（CUBE, LIGHT），尝试修复
+                if expected_type in ["MESH", "LIGHT"] and obj.type != expected_type:
+                    print(f"尝试修复对象类型: 删除错误对象并重新创建")
+                    # 删除错误对象
+                    bpy.ops.object.delete()
+                    # 再次尝试创建
+                    if expected_type == "MESH":
+                        bpy.ops.mesh.primitive_cube_add(location=loc, rotation=rot, scale=scl)
+                    elif expected_type == "LIGHT":
+                        bpy.ops.object.light_add(type='POINT', location=loc, rotation=rot)
+                    obj = bpy.context.active_object
+                    print(f"修复后对象类型: {obj.type}")
+            
+            # 设置名称
+            if name:
+                obj.name = name
+            
+            # 设置旋转和缩放 (如果在创建时未设置)
+            if rotation and not (type == "CAMERA" or type == "LIGHT"):
+                obj.rotation_euler = rotation
+            
+            if scale and not (type in ["CUBE", "SPHERE", "CYLINDER", "PLANE", "CONE", "TORUS"]):
+                obj.scale = scale
+            
+            # 返回对象属性
+            result = {
+                "name": obj.name,
+                "type": obj.type,
+                "location": [obj.location.x, obj.location.y, obj.location.z],
+                "rotation": [obj.rotation_euler.x, obj.rotation_euler.y, obj.rotation_euler.z],
+                "scale": [obj.scale.x, obj.scale.y, obj.scale.z]
+            }
+            
+            return result  # 不用再包装在status和result中，由_execute_command_internal处理
         
-        # Get the created object
-        obj = bpy.context.active_object
-        
-        # Rename if name is provided
-        if name:
-            obj.name = name
-        
-        return {
-            "name": obj.name,
-            "type": obj.type,
-            "location": [obj.location.x, obj.location.y, obj.location.z],
-            "rotation": [obj.rotation_euler.x, obj.rotation_euler.y, obj.rotation_euler.z],
-            "scale": [obj.scale.x, obj.scale.y, obj.scale.z],
-        }
+        except Exception as e:
+            print(f"创建对象错误: {str(e)}")
+            traceback.print_exc()
+            return {"error": str(e)}
     
     def modify_object(self, name, location=None, rotation=None, scale=None, visible=None):
         """Modify an existing object in the scene"""
@@ -370,89 +426,140 @@ class BlenderMCPServer:
         except Exception as e:
             raise Exception(f"Code execution error: {str(e)}")
     
-    def set_material(self, object_name, material_name=None, create_if_missing=True, color=None):
-        """Set or create a material for an object"""
+    def set_material(self, object_name, material_name=None, color=None):
+        """为对象设置或创建材质
+        
+        参数:
+            object_name: 要应用材质的对象名称
+            material_name: 可选，要使用或创建的材质名称
+            color: 可选，[R, G, B]颜色值（0.0-1.0）
+        """
         try:
-            # Get the object
+            # 尝试获取对象
             obj = bpy.data.objects.get(object_name)
             if not obj:
-                raise ValueError(f"Object not found: {object_name}")
+                return {"error": f"未找到对象: {object_name}"}
             
-            # Make sure object can accept materials
-            if not hasattr(obj, 'data') or not hasattr(obj.data, 'materials'):
-                raise ValueError(f"Object {object_name} cannot accept materials")
+            # 确定材质名称 (如果未提供)
+            if not material_name:
+                material_name = f"{object_name}_material"
             
-            # Create or get material
-            if material_name:
-                mat = bpy.data.materials.get(material_name)
-                if not mat and create_if_missing:
-                    mat = bpy.data.materials.new(name=material_name)
-                    print(f"Created new material: {material_name}")
+            # 查找现有材质或创建新材质
+            mat = bpy.data.materials.get(material_name)
+            if not mat:
+                mat = bpy.data.materials.new(name=material_name)
+                print(f"创建新材质: {material_name}")
             else:
-                # Generate unique material name if none provided
-                mat_name = f"{object_name}_material"
-                mat = bpy.data.materials.get(mat_name)
-                if not mat:
-                    mat = bpy.data.materials.new(name=mat_name)
-                material_name = mat_name
-                print(f"Using material: {mat_name}")
+                print(f"使用现有材质: {material_name}")
             
-            # Set up material nodes if needed
-            if mat:
-                if not mat.use_nodes:
-                    mat.use_nodes = True
-                
-                # Get or create Principled BSDF
-                principled = mat.node_tree.nodes.get('Principled BSDF')
-                if not principled:
-                    principled = mat.node_tree.nodes.new('ShaderNodeBsdfPrincipled')
-                    # Get or create Material Output
-                    output = mat.node_tree.nodes.get('Material Output')
-                    if not output:
-                        output = mat.node_tree.nodes.new('ShaderNodeOutputMaterial')
-                    # Link if not already linked
-                    if not principled.outputs[0].links:
-                        mat.node_tree.links.new(principled.outputs[0], output.inputs[0])
-                
-                # Set color if provided
-                if color and len(color) >= 3:
-                    principled.inputs['Base Color'].default_value = (
-                        color[0],
-                        color[1],
-                        color[2],
-                        1.0 if len(color) < 4 else color[3]
-                    )
-                    print(f"Set material color to {color}")
+            # 检查材质节点是否可用
+            if not mat.use_nodes:
+                mat.use_nodes = True
+                print(f"启用材质节点: {material_name}")
             
-            # Assign material to object if not already assigned
-            if mat:
-                if not obj.data.materials:
-                    obj.data.materials.append(mat)
+            # 设置基本材质属性
+            if hasattr(mat, "diffuse_color") and color:
+                if len(color) == 3:
+                    # 如果提供的是RGB，添加Alpha通道
+                    color_with_alpha = color + [1.0]
                 else:
-                    # Only modify first material slot
-                    obj.data.materials[0] = mat
+                    color_with_alpha = color
+                mat.diffuse_color = color_with_alpha
+                print(f"设置diffuse_color: {color_with_alpha}")
+            
+            # 安全地设置其他材质属性
+            try:
+                # 尝试设置镜面反射（如果属性存在）
+                if hasattr(mat, "specular_intensity"):
+                    mat.specular_intensity = 0.5
+                    print("设置specular_intensity: 0.5")
                 
-                print(f"Assigned material {mat.name} to object {object_name}")
+                # 尝试访问可能不存在的属性
+                metallic_attr = getattr(mat, "metallic", None)
+                if metallic_attr is not None:
+                    mat.metallic = 0.0
+                    print("设置metallic: 0.0")
+                    
+                roughness_attr = getattr(mat, "roughness", None)
+                if roughness_attr is not None:
+                    mat.roughness = 0.4
+                    print("设置roughness: 0.4")
+            except Exception as attr_e:
+                print(f"设置材质属性警告 (非关键): {str(attr_e)}")
+                # 继续处理，因为这些是非关键属性
+            
+            # 处理材质节点
+            try:
+                # 获取节点树和主要着色器节点
+                nodes = mat.node_tree.nodes
+                principled_bsdf = None
                 
-                return {
-                    "status": "success",
-                    "object": object_name,
-                    "material": mat.name,
-                    "color": color if color else None
-                }
+                # 查找或创建Principled BSDF节点
+                for node in nodes:
+                    if node.type == 'BSDF_PRINCIPLED':
+                        principled_bsdf = node
+                        break
+                
+                if not principled_bsdf:
+                    # 如果找不到，创建一个
+                    principled_bsdf = nodes.new(type='ShaderNodeBsdfPrincipled')
+                
+                # 设置节点属性
+                if color:
+                    principled_bsdf.inputs["Base Color"].default_value = color + [1.0] if len(color) == 3 else color
+                    print(f"设置Base Color: {color}")
+                
+                # 设置金属度和粗糙度
+                principled_bsdf.inputs["Metallic"].default_value = 0.0
+                principled_bsdf.inputs["Roughness"].default_value = 0.4
+                principled_bsdf.inputs["Specular"].default_value = 0.5
+                
+                # 确保节点连接到输出
+                output_node = None
+                for node in nodes:
+                    if node.type == 'OUTPUT_MATERIAL':
+                        output_node = node
+                        break
+                
+                if not output_node:
+                    output_node = nodes.new(type='ShaderNodeOutputMaterial')
+                
+                # 连接主着色器到输出
+                mat.node_tree.links.new(principled_bsdf.outputs["BSDF"], output_node.inputs["Surface"])
+                
+            except AttributeError as node_e:
+                print(f"材质节点处理警告 (非关键): {str(node_e)}")
+                # 继续处理，因为旧版本的Blender可能不支持节点
+            except KeyError as key_e:
+                print(f"材质节点键错误警告 (非关键): {str(key_e)}")
+                # 继续处理，因为一些版本可能有不同的节点输入名称
+            
+            # 将材质分配给对象
+            # 检查对象是否已经有材质插槽
+            if len(obj.material_slots) == 0:
+                obj.data.materials.append(mat)
+                print(f"添加材质到对象 {object_name}: {material_name}")
             else:
-                raise ValueError(f"Failed to create or find material: {material_name}")
+                # 更新现有插槽
+                obj.material_slots[0].material = mat
+                print(f"更新对象 {object_name} 的材质: {material_name}")
+            
+            # 确保材质实际上已经应用
+            for slot in obj.material_slots:
+                if slot.material is None:
+                    slot.material = mat
+            
+            # 返回成功结果
+            return {
+                "object_name": obj.name,
+                "material_name": mat.name,
+                "color": list(mat.diffuse_color) if hasattr(mat, "diffuse_color") else None
+            }
             
         except Exception as e:
-            print(f"Error in set_material: {str(e)}")
-            import traceback
+            print(f"设置材质错误: {str(e)}")
             traceback.print_exc()
-            return {
-                "status": "error",
-                "message": str(e),
-                "object": object_name,
-                "material": material_name if 'material_name' in locals() else None
-            }
+            return {"error": str(e)}
     
     def render_scene(self, output_path=None, resolution_x=None, resolution_y=None):
         """Render the current scene"""
@@ -837,48 +944,117 @@ class BlenderMCPServer:
             return {"error": str(e)}
     
     def join_objects(self, objects, target_object=None):
-        """合并多个对象"""
+        """合并多个对象，保留目标对象的材质
+        
+        参数:
+            objects: 要合并的对象名称列表
+            target_object: 可选，作为目标的对象名称（保留该对象的材质）
+        """
         try:
-            # 检查对象是否存在
-            obj_list = []
-            for obj_name in objects:
-                obj = bpy.data.objects.get(obj_name)
-                if obj:
-                    obj_list.append(obj)
-                else:
-                    return {"error": f"对象不存在: {obj_name}"}
+            if len(objects) < 2:
+                return {"error": "需要至少两个对象才能执行合并"}
             
-            if not obj_list:
-                return {"error": "没有有效的对象可合并"}
+            # 确定目标对象（默认为列表中的第一个）
+            if not target_object:
+                target_object = objects[0]
             
-            # 取消选择所有对象
+            # 获取目标对象
+            target_obj = bpy.data.objects.get(target_object)
+            if not target_obj:
+                return {"error": f"找不到目标对象: {target_object}"}
+            
+            # 记录目标对象的材质
+            original_materials = []
+            if hasattr(target_obj.data, 'materials') and len(target_obj.data.materials) > 0:
+                for mat_slot in target_obj.material_slots:
+                    if mat_slot.material:
+                        original_materials.append(mat_slot.material)
+                print(f"记录目标对象 {target_object} 的 {len(original_materials)} 个材质")
+            
+            # 执行合并
             bpy.ops.object.select_all(action='DESELECT')
             
-            # 设置目标对象
-            if target_object:
-                target = bpy.data.objects.get(target_object)
-                if not target or target not in obj_list:
-                    return {"error": f"目标对象无效: {target_object}"}
-            else:
-                target = obj_list[0]
+            # 记录所有要合并的有效对象
+            valid_objects = []
+            for obj_name in objects:
+                obj = bpy.data.objects.get(obj_name)
+                if obj and obj.type == target_obj.type:
+                    obj.select_set(True)
+                    valid_objects.append(obj)
+                    print(f"选择对象以合并: {obj_name}")
+                else:
+                    print(f"跳过无效对象或类型不匹配: {obj_name}")
             
-            # 选择所有要合并的对象
-            for obj in obj_list:
-                obj.select_set(True)
+            if len(valid_objects) < 2:
+                return {"error": "没有足够的有效对象进行合并"}
             
-            # 设置活动对象为目标
-            bpy.context.view_layer.objects.active = target
+            # 设置目标对象为活动对象
+            bpy.context.view_layer.objects.active = target_obj
             
-            # 合并对象
+            # 记录材质的引用计数
+            material_users = {}
+            for mat in original_materials:
+                material_users[mat.name] = mat.users
+                print(f"材质 {mat.name} 的初始引用计数: {mat.users}")
+            
+            # 执行合并
+            print(f"执行对象合并，目标对象: {target_object}")
             bpy.ops.object.join()
             
-            return {
-                "status": "success",
-                "target_object": target.name,
-                "joined_objects": len(obj_list) - 1
-            }
+            # 确保合并后重新应用原始材质
+            if original_materials:
+                print(f"重新应用原始材质到合并后的对象: {target_obj.name}")
+                
+                # 保存当前材质作为备份
+                current_materials = []
+                for i, mat_slot in enumerate(target_obj.material_slots):
+                    if mat_slot.material:
+                        current_materials.append(mat_slot.material)
+                
+                # 检查合并后的材质是否与原始材质相同
+                materials_changed = False
+                if len(current_materials) != len(original_materials):
+                    materials_changed = True
+                    print(f"材质数量改变: {len(current_materials)} vs 原始 {len(original_materials)}")
+                else:
+                    for i, mat in enumerate(original_materials):
+                        if current_materials[i] != mat:
+                            materials_changed = True
+                            print(f"材质 #{i} 已改变: {current_materials[i].name} vs 原始 {mat.name}")
+                
+                # 如果材质发生变化，重新应用原始材质
+                if materials_changed:
+                    print("材质已改变，重新应用原始材质")
+                    
+                    # 清除所有现有材质
+                    while len(target_obj.data.materials) > 0:
+                        target_obj.data.materials.pop(index=0)
+                    
+                    # 重新应用原始材质
+                    for mat in original_materials:
+                        target_obj.data.materials.append(mat)
+                    
+                    # 检查材质的引用计数
+                    for mat in original_materials:
+                        new_users = mat.users
+                        old_users = material_users.get(mat.name, 0)
+                        print(f"材质 {mat.name} 的引用计数: {new_users} (之前: {old_users})")
+                else:
+                    print("材质保持不变，无需重新应用")
             
+            # 确保视图更新
+            bpy.context.view_layer.update()
+            
+            # 返回合并后的对象信息
+            return {
+                "name": target_obj.name,
+                "type": target_obj.type,
+                "materials": [m.name for m in target_obj.data.materials] if hasattr(target_obj.data, 'materials') else [],
+                "vertex_count": len(target_obj.data.vertices) if hasattr(target_obj.data, 'vertices') else 0
+            }
         except Exception as e:
+            print(f"合并对象错误: {str(e)}")
+            traceback.print_exc()
             return {"error": str(e)}
     
     def separate_mesh(self, object_name, method='SELECTED'):
@@ -1067,10 +1243,10 @@ class BlenderMCPServer:
             
             # 根据类型设置特定参数
             if light_type == "SPOT":
-                light_data.spot_size = radians(45.0)  # 45度聚光角度
+                light_data.spot_size = math.radians(45.0)  # 45度聚光角度
                 light_data.spot_blend = 0.15
             elif light_type == "SUN":
-                light_data.angle = radians(0.526)  # 太阳角度
+                light_data.angle = math.radians(0.526)  # 太阳角度
             elif light_type == "AREA":
                 light_data.shape = 'RECTANGLE'
                 light_data.size = 1.0

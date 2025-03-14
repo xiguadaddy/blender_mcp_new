@@ -250,7 +250,30 @@ BlenderMCP服务器默认在`localhost:9876`上运行，使用TCP套接字通信
 
 **参数**：
 - `objects`: 要合并的对象名称列表
-- `target_object`: (可选) 目标对象，默认为列表中的第一个
+- `target_object`: 合并后保留的对象名称（必须是objects列表中的一个）
+
+**请求示例**：
+```json
+{
+  "type": "join_objects",
+  "params": {
+    "objects": ["Cube1", "Cube2", "Sphere"],
+    "target_object": "Cube1"
+  }
+}
+```
+
+**响应**：
+```json
+{
+  "status": "success",
+  "result": {
+    "name": "Cube1",
+    "type": "MESH",
+    "vertices": 26
+  }
+}
+```
 
 ### separate_mesh
 分离网格组件。
@@ -291,10 +314,30 @@ BlenderMCP服务器默认在`localhost:9876`上运行，使用TCP套接字通信
 **参数**：
 - `light_type`: 灯光类型，如"POINT", "SUN", "SPOT", "AREA"
 - `name`: (可选) 灯光名称
-- `location`: 位置
+- `location`: 位置 [x, y, z]
 - `energy`: 能量/亮度
 - `color`: 颜色RGB值 [r, g, b]
-- `shadow`: 是否产生阴影
+- `shadow`: (可选) 是否产生阴影，默认为True
+
+**请求示例**：
+```json
+{
+  "type": "advanced_lighting",
+  "params": {
+    "light_type": "AREA",
+    "name": "工作区灯光",
+    "location": [0, 0, 5],
+    "energy": 50,
+    "color": [1.0, 0.95, 0.9]
+  }
+}
+```
+
+**注意**：不同类型的灯光支持不同的参数：
+- "POINT": 点光源，支持所有基本参数
+- "SUN": 太阳光，支持基本参数
+- "SPOT": 聚光灯，支持基本参数
+- "AREA": 区域光，支持基本参数
 
 ### set_material
 设置对象材质。
@@ -320,3 +363,69 @@ BlenderMCP服务器默认在`localhost:9876`上运行，使用TCP套接字通信
 - `code`: 要执行的Python代码
 
 **注意**：此功能强大但有潜在风险，请谨慎使用。
+
+## 错误处理
+
+处理API响应时，应当始终验证响应的状态。所有响应均包含一个`status`字段，可能的值为：
+
+- `success`: 命令成功执行
+- `error`: 命令执行失败
+
+如果状态为`error`，响应还将包含一个`message`字段，说明错误原因。
+
+**最佳实践**:
+
+1. **始终检查响应状态**:
+   ```python
+   response = client.send_command("create_object", {"type": "CUBE"})
+   if response.get("status") == "error":
+       print(f"错误: {response.get('message', '未知错误')}")
+       return
+   ```
+
+2. **验证对象是否存在**:
+   在进行可能依赖对象存在的操作前，验证对象是否在场景中：
+   ```python
+   verify_response = client.send_command("get_object_info", {"name": object_name})
+   if verify_response.get("status") != "success":
+       print(f"错误: 对象 {object_name} 不存在")
+       return
+   ```
+
+3. **使用重试机制**:
+   对于关键操作，可以实现简单的重试逻辑：
+   ```python
+   max_retries = 3
+   for attempt in range(max_retries):
+       response = client.create_object("CUBE", name="MyCube")
+       if response.get("status") == "success":
+           break
+       print(f"警告: 尝试 {attempt+1}/{max_retries} 失败，正在重试...")
+       time.sleep(0.5)  # 等待短暂时间后重试
+   ```
+
+4. **获取对象名称**:
+   响应格式可能因命令类型而异，建议使用辅助函数提取对象名称：
+   ```python
+   def get_object_name(response):
+       """从响应中获取对象名称，处理不同的响应格式"""
+       if response is None:
+           return None
+           
+       if isinstance(response, dict):
+           if "status" in response and response["status"] == "error":
+               return None
+               
+           if "result" in response and isinstance(response["result"], dict):
+               if "name" in response["result"]:
+                   return response["result"]["name"]
+               if "object" in response["result"]:
+                   return response["result"]["object"]
+                   
+           if "name" in response:
+               return response["name"]
+       
+       return None
+   ```
+
+遵循这些最佳实践可以提高脚本的健壮性，使其能够更好地处理各种错误情况。
