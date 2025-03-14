@@ -283,11 +283,25 @@ def create_pawn(client, name, location, is_white=True):
         client.set_material(body_obj_name, color=color)
         client.set_material(head_obj_name, color=color)
         
-        # 合并小兵的组件
-        debug_print(f"合并小兵组件: {base_obj_name}, {body_obj_name}, {head_obj_name}")
+        # 合并小兵的组件前验证对象是否存在
+        components = [base_obj_name, body_obj_name, head_obj_name]
+        valid_components = []
+        for component in components:
+            verify_response = client.send_command("get_object_info", {"name": component})
+            if "status" in verify_response and verify_response["status"] == "success":
+                valid_components.append(component)
+            else:
+                debug_print(f"组件 {component} 不存在，将跳过合并")
+        
+        if len(valid_components) < 2:
+            print(f"警告：没有足够有效的组件来合并小兵: {name}")
+            return base_obj_name if base_obj_name in valid_components else None
+        
+        # 使用验证过的组件列表执行合并
+        debug_print(f"合并小兵有效组件: {valid_components}")
         merge_response = client.join_objects(
-            objects=[base_obj_name, body_obj_name, head_obj_name],
-            target_object=base_obj_name
+            objects=valid_components,
+            target_object=valid_components[0]
         )
         debug_print(f"合并响应: {json.dumps(merge_response, ensure_ascii=False)[:100]}")
         
