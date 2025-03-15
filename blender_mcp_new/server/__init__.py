@@ -1,11 +1,22 @@
 """
-Blender MCP服务器包
+BlenderMCP 服务器模块
+提供与Blender互操作的网络API服务器
 
-这个包实现了一个符合MCP规范的服务器，
-用于通过网络接口控制Blender。
+版本: 0.2.0
 """
 
 __version__ = "0.2.0"
+
+import logging
+
+# 设置日志
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+
+logger = logging.getLogger('blender_mcp.server')
+logger.info(f"BlenderMCP服务器模块初始化，版本: {__version__}")
 
 # 此模块需要在Blender内部导入
 try:

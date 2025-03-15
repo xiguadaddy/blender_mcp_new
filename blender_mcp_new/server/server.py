@@ -85,20 +85,56 @@ class BlenderMCPServer:
     def start(self):
         """启动服务器"""
         if self.running:
+            logger.warning("尝试启动已经运行的服务器")
             return response_utils.create_error_response("OPERATION_FAILED", "服务器已经在运行")
         
         try:
+            logger.debug(f"创建套接字，准备绑定到 {self.host}:{self.port}")
             self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            self.server_socket.bind((self.host, self.port))
-            self.server_socket.listen(5)
+            
+            # 设置超时防止阻塞
+            self.server_socket.settimeout(10.0)
+            
+            # 尝试绑定端口
+            try:
+                logger.debug(f"绑定端口 {self.port}")
+                self.server_socket.bind((self.host, self.port))
+            except socket.error as e:
+                logger.error(f"绑定端口失败: {str(e)}")
+                if e.errno == 98 or "Address already in use" in str(e):
+                    return response_utils.create_error_response("PORT_IN_USE", f"端口 {self.port} 已被占用")
+                elif e.errno == 99 or "Cannot assign requested address" in str(e):
+                    return response_utils.create_error_response("INVALID_ADDRESS", f"无法绑定到地址 {self.host}")
+                else:
+                    return response_utils.create_error_response("SOCKET_ERROR", f"套接字错误: {str(e)}")
+            
+            # 开始监听连接
+            try:
+                logger.debug("开始监听连接")
+                self.server_socket.listen(5)
+            except Exception as e:
+                logger.error(f"监听失败: {str(e)}")
+                return response_utils.create_error_response("LISTEN_FAILED", f"监听连接失败: {str(e)}")
+            
+            # 设置运行标志并启动线程
             self.running = True
+            logger.debug("创建并启动连接接收线程")
             self.thread = threading.Thread(target=self._accept_connections)
             self.thread.daemon = True
             self.thread.start()
+            
+            logger.info(f"服务器成功启动在 {self.host}:{self.port}")
             return response_utils.create_success_response({"message": f"服务器运行在 {self.host}:{self.port}"})
+        except socket.error as e:
+            self.last_error = str(e)
+            logger.error(f"套接字错误: {str(e)}")
+            logger.error(traceback.format_exc())
+            return response_utils.create_error_response("SOCKET_ERROR", f"套接字错误: {str(e)}")
         except Exception as e:
             self.last_error = str(e)
+            logger.error(f"启动服务器时发生未知错误: {str(e)}")
+            logger.error(traceback.format_exc())
             return response_utils.create_error_response("OPERATION_FAILED", f"启动服务器失败: {str(e)}")
     
     def stop(self):
@@ -125,9 +161,15 @@ class BlenderMCPServer:
     
     def _accept_connections(self):
         """接受新连接的线程函数"""
+        logger.debug("启动连接接收线程")
+        self.server_socket.settimeout(1.0)  # 设置超时，使循环能够定期检查self.running
+        
         while self.running:
             try:
+                logger.debug("等待新连接...")
                 client_socket, address = self.server_socket.accept()
+                logger.info(f"接受到新连接: {address}")
+                
                 self.clients.append(client_socket)
                 client_thread = threading.Thread(
                     target=self._handle_client,
@@ -135,19 +177,29 @@ class BlenderMCPServer:
                 )
                 client_thread.daemon = True
                 client_thread.start()
+                logger.debug(f"为客户端 {address} 创建了新线程")
+            except socket.timeout:
+                # 这是预期的超时，仅用于循环检查self.running
+                continue
             except Exception as e:
                 if self.running:  # 只有在服务器应该运行时才报错
                     self.last_error = str(e)
-                    print(f"接受连接时出错: {str(e)}")
+                    logger.error(f"接受连接时出错: {str(e)}")
+                    logger.error(traceback.format_exc())
                 time.sleep(0.1)  # 避免CPU占用过高
     
     def _handle_client(self, client_socket, address):
         """处理单个客户端连接"""
-        print(f"新客户端连接: {address}")
+        logger.info(f"新客户端连接: {address}")
+        
+        client_socket.settimeout(60.0)  # 设置超时，防止永久阻塞
+        
         while self.running:
             try:
+                logger.debug(f"等待客户端 {address} 的数据...")
                 data = client_socket.recv(self.buffer_size)
                 if not data:
+                    logger.info(f"客户端 {address} 关闭连接")
                     break
                 
                 try:

@@ -451,6 +451,72 @@ class BlenderMCPClient:
             params["output_path"] = output_path
             
         return self.send_command("render_scene", params)
+    
+    def render_scene_async(self, resolution_x=None, resolution_y=None, output_path=None):
+        """异步渲染当前场景
+        
+        参数:
+            resolution_x (int): 渲染分辨率宽度
+            resolution_y (int): 渲染分辨率高度
+            output_path (str): 输出文件路径
+            
+        返回:
+            dict: 包含任务ID的响应
+        """
+        params = {}
+        
+        if resolution_x:
+            params["resolution_x"] = resolution_x
+        if resolution_y:
+            params["resolution_y"] = resolution_y
+        if output_path:
+            params["output_path"] = output_path
+            
+        return self.send_command("render_scene_async", params)
+    
+    def get_task(self, task_id):
+        """获取任务状态
+        
+        参数:
+            task_id (str): 任务ID
+            
+        返回:
+            dict: 包含任务状态的响应
+        """
+        params = {"task_id": task_id}
+        return self.send_command("get_task", params)
+    
+    def get_task_detailed(self, task_id):
+        """获取详细的任务信息
+        
+        参数:
+            task_id (str): 任务ID
+            
+        返回:
+            dict: 包含详细任务信息的响应
+        """
+        params = {"task_id": task_id}
+        return self.send_command("get_task_detailed", params)
+    
+    def list_tasks(self):
+        """获取所有任务列表
+        
+        返回:
+            dict: 包含任务列表的响应
+        """
+        return self.send_command("list_tasks")
+    
+    def cancel_task(self, task_id):
+        """取消任务
+        
+        参数:
+            task_id (str): 任务ID
+            
+        返回:
+            dict: 操作结果响应
+        """
+        params = {"task_id": task_id}
+        return self.send_command("cancel_task", params)
 
 
 # 示例用法
