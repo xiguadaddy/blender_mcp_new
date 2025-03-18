@@ -6,6 +6,7 @@
 
 import bpy
 import logging
+import traceback
 from ..tool_handlers import execute_in_main_thread
 
 # 设置日志
@@ -13,19 +14,30 @@ logger = logging.getLogger("BlenderMCP.MaterialTools")
 
 # 材质创建函数
 def set_material(args):
-    """为对象设置材质"""
+    """为对象设置或创建材质
+    
+    参数:
+        object_name: 要应用材质的对象名称
+        material_name: 可选，要使用或创建的材质名称
+        color: 可选，材质颜色 [R, G, B] 或 [R, G, B, A]
+        metallic: 可选，金属度 (0.0-1.0)
+        roughness: 可选，粗糙度 (0.0-1.0)
+        specular: 可选，镜面反射强度 (0.0-1.0)
+    """
     logger.debug(f"设置材质: {args}")
     object_name = args.get("object_name")
-    material_name = args.get("material_name")  # 添加材质名称参数
+    material_name = args.get("material_name")  # 材质名称参数
     color = args.get("color", [0.8, 0.8, 0.8, 1.0])
     metallic = args.get("metallic", 0.0)
     roughness = args.get("roughness", 0.5)
-    specular = args.get("specular", 0.5)  # 添加镜面反射参数
+    specular = args.get("specular", 0.5)  # 镜面反射参数
     
     def exec_func():
         try:
+            # 尝试获取对象
             obj = bpy.data.objects.get(object_name)
             if not obj:
+                logger.error(f"找不到对象: {object_name}")
                 return {"error": f"找不到对象: {object_name}"}
                 
             # 确定材质名称 (如果未提供)
@@ -40,32 +52,75 @@ def set_material(args):
                 logger.debug(f"使用现有材质: {mat_name}")
             
             # 启用节点编辑
-            mat.use_nodes = True
+            if not mat.use_nodes:
+                mat.use_nodes = True
+                logger.debug(f"启用材质节点: {mat_name}")
             
             # 获取主要着色器节点
             nodes = mat.node_tree.nodes
-            principled_bsdf = nodes.get('Principled BSDF')
+            principled_bsdf = None
+            
+            # 查找Principled BSDF节点
+            for node in nodes:
+                if node.type == 'BSDF_PRINCIPLED':
+                    principled_bsdf = node
+                    break
             
             # 如果找不到主要着色器节点，创建一个
             if not principled_bsdf:
                 principled_bsdf = nodes.new(type='ShaderNodeBsdfPrincipled')
+                logger.debug("创建新的Principled BSDF节点")
             
             # 设置颜色和属性
             try:
                 # 确保颜色有Alpha通道
-                if color and len(color) == 3:
-                    color = color + [1.0]
+                if color:
+                    if len(color) == 3:
+                        color_with_alpha = color + [1.0]
+                    else:
+                        color_with_alpha = color
+                    
+                    # 设置主要材质属性
+                    if principled_bsdf and "Base Color" in principled_bsdf.inputs:
+                        principled_bsdf.inputs["Base Color"].default_value = color_with_alpha
+                        logger.debug(f"设置Base Color: {color_with_alpha}")
                 
-                # 设置主要材质属性
+                # 设置其他节点属性
                 if principled_bsdf:
-                    principled_bsdf.inputs["Base Color"].default_value = color
-                    principled_bsdf.inputs["Metallic"].default_value = metallic
-                    principled_bsdf.inputs["Roughness"].default_value = roughness
-                    principled_bsdf.inputs["Specular"].default_value = specular
+                    # 设置金属度
+                    if "Metallic" in principled_bsdf.inputs:
+                        principled_bsdf.inputs["Metallic"].default_value = metallic
+                        logger.debug(f"设置Metallic: {metallic}")
+                    
+                    # 设置粗糙度
+                    if "Roughness" in principled_bsdf.inputs:
+                        principled_bsdf.inputs["Roughness"].default_value = roughness
+                        logger.debug(f"设置Roughness: {roughness}")
+                    
+                    # 设置镜面反射
+                    if "Specular" in principled_bsdf.inputs:
+                        principled_bsdf.inputs["Specular"].default_value = specular
+                        logger.debug(f"设置Specular: {specular}")
                 
                 # 设置老版本Blender材质属性（向后兼容）
-                if hasattr(mat, "diffuse_color"):
-                    mat.diffuse_color = color
+                if hasattr(mat, "diffuse_color") and color:
+                    mat.diffuse_color = color_with_alpha
+                    logger.debug(f"设置diffuse_color: {color_with_alpha}")
+                
+                # 尝试设置其他向后兼容属性
+                if hasattr(mat, "specular_intensity"):
+                    mat.specular_intensity = specular
+                    logger.debug(f"设置specular_intensity: {specular}")
+                
+                metallic_attr = getattr(mat, "metallic", None)
+                if metallic_attr is not None:
+                    mat.metallic = metallic
+                    logger.debug(f"设置metallic属性: {metallic}")
+                    
+                roughness_attr = getattr(mat, "roughness", None)
+                if roughness_attr is not None:
+                    mat.roughness = roughness
+                    logger.debug(f"设置roughness属性: {roughness}")
                 
                 # 确保输出节点连接
                 output_node = None
@@ -76,9 +131,14 @@ def set_material(args):
                 
                 if not output_node:
                     output_node = nodes.new(type='ShaderNodeOutputMaterial')
+                    logger.debug("创建新的输出节点")
                 
                 # 连接着色器到输出
-                mat.node_tree.links.new(principled_bsdf.outputs["BSDF"], output_node.inputs["Surface"])
+                if principled_bsdf and "BSDF" in principled_bsdf.outputs:
+                    # 检查是否已经连接
+                    if not output_node.inputs['Surface'].links:
+                        mat.node_tree.links.new(principled_bsdf.outputs["BSDF"], output_node.inputs["Surface"])
+                        logger.debug("连接BSDF到输出节点")
                 
             except (AttributeError, KeyError) as e:
                 logger.warning(f"设置材质属性时出现非关键错误: {str(e)}")
@@ -87,26 +147,32 @@ def set_material(args):
             # 应用材质到对象
             if len(obj.material_slots) == 0:
                 obj.data.materials.append(mat)
+                logger.debug(f"添加材质到对象 {object_name}: {mat.name}")
             else:
                 # 更新现有插槽
                 obj.material_slots[0].material = mat
+                logger.debug(f"更新对象 {object_name} 的材质: {mat.name}")
                 
             # 确保所有插槽都有材质
             for slot in obj.material_slots:
                 if slot.material is None:
                     slot.material = mat
+                    logger.debug(f"填充空材质插槽: {mat.name}")
                 
             return {
                 "status": "success", 
                 "material_name": mat.name,
                 "object_name": object_name,
-                "color": list(color),
+                "color": list(color_with_alpha) if 'color_with_alpha' in locals() else None,
                 "metallic": metallic,
-                "roughness": roughness
+                "roughness": roughness,
+                "specular": specular
             }
         except Exception as e:
-            logger.error(f"设置材质时出错: {str(e)}")
-            return {"error": str(e)}
+            error_msg = f"设置材质时出错: {str(e)}"
+            logger.error(error_msg)
+            logger.debug(traceback.format_exc())
+            return {"error": error_msg}
             
     return execute_in_main_thread(exec_func)
 

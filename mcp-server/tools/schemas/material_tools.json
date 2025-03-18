@@ -1,0 +1,195 @@
+{
+  "set_material": {
+    "type": "object",
+    "properties": {
+      "object_name": {
+        "type": "string",
+        "description": "Name of the object to set material for"
+      },
+      "material_name": {
+        "type": "string",
+        "description": "Name for the new material, or name of existing material to use"
+      },
+      "color": {
+        "type": "array",
+        "items": {
+          "type": "number"
+        },
+        "default": [0.8, 0.8, 0.8, 1.0],
+        "description": "RGBA color value [r, g, b, a]"
+      },
+      "metallic": {
+        "type": "number",
+        "default": 0.0,
+        "description": "Metallic value (0.0 to 1.0)"
+      },
+      "roughness": {
+        "type": "number",
+        "default": 0.5,
+        "description": "Roughness value (0.0 to 1.0)"
+      },
+      "specular": {
+        "type": "number",
+        "default": 0.5,
+        "description": "Specular value (0.0 to 1.0)"
+      }
+    },
+    "required": ["object_name"]
+  },
+  "create_node_material": {
+    "type": "object",
+    "properties": {
+      "name": {
+        "type": "string",
+        "description": "Name for the new node material"
+      },
+      "node_setup": {
+        "type": "object",
+        "description": "Node setup configuration for the material",
+        "properties": {
+          "nodes": {
+            "type": "object",
+            "description": "Dictionary of nodes to create, keyed by node ID",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "default": "ShaderNodeBsdfPrincipled",
+                  "description": "Type of node to create"
+                },
+                "location": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "default": [0, 0],
+                  "description": "Node location in node editor"
+                },
+                "properties": {
+                  "type": "object",
+                  "description": "Node properties to set"
+    }
+  },
+  "update_material_property": {
+    "type": "object",
+    "properties": {
+      "material_name": {
+        "type": "string",
+        "description": "Name of the material to update"
+      },
+      "property_name": {
+        "type": "string",
+        "description": "Name of the property to update (e.g., color, metallic, roughness)"
+      },
+      "value": {
+        "type": "any",
+        "description": "New value for the property"
+      }
+    },
+    "required": ["material_name", "property_name", "value"]
+  },
+  "rename_material": {
+    "type": "object",
+    "properties": {
+      "material_name": {
+        "type": "string",
+        "description": "Current name of the material"
+      },
+      "new_name": {
+        "type": "string",
+        "description": "New name for the material"
+      }
+    },
+    "required": ["material_name", "new_name"]
+  },
+  "delete_material": {
+    "type": "object",
+    "properties": {
+      "material_names": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "List of material names to delete"
+      },
+      "material_name": {
+        "type": "string",
+        "description": "Name of a single material to delete (deprecated, use material_names instead)"
+    }
+  },
+  "duplicate_material": {
+    "type": "object",
+    "properties": {
+      "material_name": {
+        "type": "string",
+        "description": "Name of the material to duplicate"
+      },
+      "new_name": {
+        "type": "string",
+        "description": "New name for the duplicated material, defaults to [material_name]_copy"
+      }
+    },
+    "required": ["material_name"]
+  }
+}
+}
+          },
+          "links": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "from_node": {
+                  "type": "string",
+                  "description": "ID of the source node"
+                },
+                "to_node": {
+                  "type": "string",
+                  "description": "ID of the destination node"
+                },
+                "from_socket": {
+                  "type": ["string", "integer"],
+                  "default": 0,
+                  "description": "Output socket name or index"
+                },
+                "to_socket": {
+                  "type": ["string", "integer"],
+                  "default": 0,
+                  "description": "Input socket name or index"
+                }
+              },
+              "required": ["from_node", "to_node"]
+            }
+          }
+        }
+      }
+    },
+    "required": ["name"]
+  },
+  "get_material_info": {
+    "type": "object",
+    "properties": {
+      "material_name": {
+        "type": "string",
+        "description": "Name of the material to get info for"
+      },
+      "include_nodes": {
+        "type": "boolean",
+        "description": "Whether to include detailed node setup information",
+        "default": false
+      }
+    },
+    "required": ["material_name"]
+  },
+  "list_materials": {
+    "type": "object",
+    "properties": {
+      "include_basic_info": {
+        "type": "boolean",
+        "description": "Whether to include basic material info (use_nodes, color)",
+        "default": true
+      }
+    }
+  }
+}

@@ -1,0 +1,257 @@
+{
+  "create_object": {
+    "type": "object",
+    "properties": {
+      "object_type": {
+        "type": "string",
+        "enum": ["cube", "sphere", "plane", "cylinder", "cone", "torus", "empty"],
+        "description": "Type of object to create"
+      },
+      "location": {
+        "type": "array",
+        "items": {
+          "type": "number"
+        },
+        "default": [0, 0, 0],
+        "description": "Object location [x, y, z]"
+      },
+      "name": {
+        "type": "string",
+        "description": "Object name"
+      },
+      "size": {
+        "type": "number",
+        "description": "Object size",
+        "default": 2.0
+      },
+      "empty_type": {
+        "type": "string",
+        "enum": ["PLAIN_AXES", "SINGLE_ARROW", "CIRCLE", "CUBE", "SPHERE", "CONE", "IMAGE", "GP_AXES"],
+        "description": "Display type for empty objects",
+        "default": "PLAIN_AXES"
+      }
+    },
+    "required": ["object_type"]
+  },
+  "create_text": {
+    "type": "object",
+    "properties": {
+      "text": {
+        "type": "string",
+        "description": "Text content",
+        "default": "Text"
+      },
+      "name": {
+        "type": "string",
+        "description": "Object name"
+      },
+      "location": {
+        "type": "array",
+        "items": {
+          "type": "number"
+        },
+        "default": [0, 0, 0],
+        "description": "Object location (x, y, z)"
+      },
+      "scale": {
+        "type": "array",
+        "items": {
+          "type": "number"
+        },
+        "default": [1, 1, 1],
+        "description": "Object scale (x, y, z)"
+      },
+      "extrude": {
+        "type": "number",
+        "description": "Text extrude value",
+        "default": 0.0
+      }
+    }
+  },
+  "create_curve": {
+    "type": "object",
+    "properties": {
+      "points": {
+        "type": "array",
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          }
+        },
+        "description": "List of points for the curve"
+      },
+      "name": {
+        "type": "string",
+        "description": "Curve object name"
+      },
+      "curve_type": {
+        "type": "string",
+        "enum": ["POLY", "BEZIER", "NURBS"],
+        "description": "Type of curve",
+        "default": "POLY"
+      }
+    },
+    "required": ["points"]
+  },
+  "duplicate_object": {
+    "type": "object",
+    "properties": {
+      "object_name": {
+        "type": "string",
+        "description": "Name of the object to duplicate"
+      },
+      "new_name": {
+        "type": "string",
+        "description": "Name for the new duplicated object"
+      },
+      "linked": {
+        "type": "boolean",
+        "description": "Whether to create a linked duplicate (shared data)",
+        "default": false
+      }
+    },
+    "required": ["object_name"]
+  },
+  "transform_object": {
+    "type": "object",
+    "properties": {
+      "object_name": {
+        "type": "string",
+        "description": "Name of the object to transform"
+      },
+      "location": {
+        "type": "array",
+        "items": {
+          "type": "number"
+        },
+        "description": "New location for the object [x, y, z]"
+      },
+      "rotation": {
+        "type": "array",
+        "items": {
+          "type": "number"
+        },
+        "description": "New rotation for the object [x, y, z] in Euler angles (radians)"
+      },
+      "scale": {
+        "type": "array",
+        "items": {
+          "type": "number"
+        },
+        "description": "New scale for the object [x, y, z]"
+      }
+    },
+    "required": ["object_name"]
+  },
+  "set_vertex_position": {
+    "type": "object",
+    "properties": {
+      "object_name": {
+        "type": "string",
+        "description": "Name of the mesh object"
+      },
+      "vertex_indices": {
+        "type": "array",
+        "items": {
+          "type": "integer"
+        },
+        "description": "List of vertex indices to modify"
+      },
+      "positions": {
+        "type": "array",
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          }
+        },
+        "description": "List of new positions [x, y, z] for each vertex"
+      }
+    },
+    "required": ["object_name", "vertex_indices", "positions"]
+  },
+  "set_object_parent": {
+    "type": "object",
+    "properties": {
+      "object_name": {
+        "type": "string",
+        "description": "Name of the object to set parent for"
+      },
+      "parent_name": {
+        "type": "string",
+        "description": "Name of the parent object. If not provided, parent is cleared."
+      },
+      "keep_transform": {
+        "type": "boolean",
+        "description": "Whether to keep the object's world transform",
+        "default": true
+      }
+    },
+    "required": ["object_name"]
+  },
+  "rename_object": {
+    "type": "object",
+    "properties": {
+      "object_name": {
+        "type": "string",
+        "description": "Current name of the object"
+      },
+      "new_name": {
+        "type": "string",
+        "description": "New name for the object"
+      }
+    },
+    "required": ["object_name", "new_name"]
+  },
+  "get_object_info": {
+    "type": "object",
+    "properties": {
+      "object_name": {
+        "type": "string",
+        "description": "Name of the object to get info for"
+      },
+      "include_mesh_data": {
+        "type": "boolean",
+        "description": "Whether to include detailed mesh data (vertices, polygons)",
+        "default": false
+      },
+      "include_materials": {
+        "type": "boolean",
+        "description": "Whether to include material information",
+        "default": true
+      }
+    },
+    "required": ["object_name"]
+  },
+  "list_objects": {
+    "type": "object",
+    "properties": {
+      "filter_type": {
+        "type": "string",
+        "enum": ["MESH", "LIGHT", "CAMERA", "EMPTY", "CURVE", "ARMATURE"],
+        "description": "Filter objects by type (MESH, LIGHT, CAMERA, EMPTY, CURVE, ARMATURE)"
+      },
+      "collection_name": {
+        "type": "string",
+        "description": "Name of the collection to list objects from"
+    }
+  },
+  "delete_object": {
+    "type": "object",
+    "properties": {
+      "object_names": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "List of object names to delete"
+      },
+      "object_name": {
+        "type": "string",
+        "description": "Name of a single object to delete (deprecated, use object_names instead)"
+      }
+    }
+  }
+}
+}

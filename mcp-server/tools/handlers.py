@@ -8,6 +8,10 @@ def register_tool_handlers(server, ipc_client):
     @server.list_tools()
     async def handle_list_tools():
         """列出可用的Blender工具"""
+
+        tool_resources = await ipc_client.send_request({"action": "list_tools"})
+        print(f"MCP服务器：获取到的工具列表: {tool_resources}")
+        
         print("MCP服务器：处理list_tools请求")
         tools = [
             # 1. 基础对象创建工具

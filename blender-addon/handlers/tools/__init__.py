@@ -10,10 +10,9 @@ from . import material_tools
 from . import lighting_tools
 from . import camera_tools
 from . import scene_tools
-# 下面模块待添加
-# from . import animation_tools
 from . import modeling_tools
-# from . import effect_tools
+from . import animation_tools
+from . import effect_tools
 
 def register_all_tools():
     """
@@ -32,9 +31,8 @@ def register_all_tools():
     all_tools.update(lighting_tools.TOOLS)
     all_tools.update(camera_tools.TOOLS)
     all_tools.update(scene_tools.TOOLS)
-    # 下面模块待添加
-    # all_tools.update(animation_tools.TOOLS)
     all_tools.update(modeling_tools.TOOLS)
-    # all_tools.update(effect_tools.TOOLS)
+    all_tools.update(animation_tools.TOOLS)
+    all_tools.update(effect_tools.TOOLS)
     
-    return all_tools 
+    return all_tools

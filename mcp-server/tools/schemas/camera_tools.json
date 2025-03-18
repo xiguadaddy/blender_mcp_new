@@ -1,0 +1,179 @@
+{
+  "add_camera": {
+    "type": "object",
+    "properties": {
+      "name": {
+        "type": "string",
+        "description": "Camera object name",
+        "default": "New_Camera"
+      },
+      "location": {
+        "type": "array",
+        "items": {
+          "type": "number"
+        },
+        "default": [0, 0, 0],
+        "description": "Camera location [x, y, z]"
+      },
+      "rotation": {
+        "type": "array",
+        "items": {
+          "type": "number"
+        },
+        "default": [0, 0, 0],
+        "description": "Camera rotation [x, y, z]"
+      },
+      "lens": {
+        "type": "number",
+        "description": "Camera lens value",
+        "default": 50.0
+  },
+  "set_camera": {
+    "type": "object",
+    "properties": {
+      "name": {
+        "type": "string",
+        "description": "Camera object name, will create a new camera if not provided or not found"
+      },
+      "location": {
+        "type": "array",
+        "items": {
+          "type": "number"
+        },
+        "description": "Camera location [x, y, z]"
+      },
+      "rotation": {
+        "type": "array",
+        "items": {
+          "type": "number"
+        },
+        "description": "Camera rotation [x, y, z]"
+      },
+      "target": {
+        "type": "array",
+        "items": {
+          "type": "number"
+        },
+        "description": "Target location [x, y, z] for camera to track"
+      },
+      "lens": {
+        "type": "number",
+        "description": "Camera lens value"
+      },
+      "depth_of_field": {
+        "type": "object",
+        "description": "Depth of field settings",
+        "properties": {
+          "focus_distance": {
+            "type": "number",
+            "description": "Focus distance"
+          },
+          "aperture_fstop": {
+            "type": "number",
+            "description": "Aperture f-stop"
+          },
+          "aperture_blades": {
+            "type": "number",
+            "description": "Aperture blades"
+          },
+          "aperture_rotation": {
+            "type": "number",
+            "description": "Aperture rotation"
+          },
+          "aperture_ratio": {
+            "type": "number",
+            "description": "Aperture ratio"
+  }
+,
+  "update_camera": {
+    "type": "object",
+    "properties": {
+      "camera_name": {
+        "type": "string",
+        "description": "Name of the camera object to update"
+      },
+      "location": {
+        "type": "array",
+        "items": {
+          "type": "number"
+        },
+        "description": "Camera location [x, y, z]"
+      },
+      "rotation": {
+        "type": "array",
+        "items": {
+          "type": "number"
+        },
+        "description": "Camera rotation [x, y, z]"
+      },
+      "lens": {
+        "type": "number",
+        "description": "Camera lens value"
+      },
+      "depth_of_field": {
+        "type": "object",
+        "description": "Depth of field settings",
+        "properties": {
+          "focus_distance": {
+            "type": "number",
+            "description": "Focus distance"
+          },
+          "aperture_fstop": {
+            "type": "number",
+            "description": "Aperture f-stop"
+          },
+          "aperture_blades": {
+            "type": "number",
+            "description": "Aperture blades"
+          },
+          "aperture_rotation": {
+            "type": "number",
+            "description": "Aperture rotation"
+          },
+          "aperture_ratio": {
+            "type": "number",
+            "description": "Aperture ratio"
+  }
+,
+  "get_camera_info": {
+    "type": "object",
+    "properties": {
+      "camera_name": {
+        "type": "string",
+        "description": "Name of the camera object to get info for"
+      }
+    },
+    "required": ["camera_name"]
+  },
+  "list_cameras": {
+    "type": "object",
+    "properties": {}
+  },
+  "delete_camera": {
+    "type": "object",
+    "properties": {
+      "camera_names": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "List of camera names to delete"
+      },
+      "camera_name": {
+        "type": "string",
+        "description": "Name of a single camera to delete (deprecated, use camera_names instead)"
+      }
+    }
+  }
+}
+      }
+    },
+    "required": ["camera_name"]
+  }
+}
+      }
+    }
+  }
+}
+  }
+}

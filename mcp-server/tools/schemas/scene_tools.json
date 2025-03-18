@@ -1,0 +1,221 @@
+{
+  "render_scene": {
+    "type": "object",
+    "properties": {
+      "output_path": {
+        "type": "string",
+        "description": "Output file path for rendering"
+      },
+      "output_format": {
+        "type": "string",
+        "description": "Output image format (e.g., PNG, JPEG, etc.)",
+        "default": "PNG"
+      },
+      "resolution_x": {
+        "type": "integer",
+        "description": "Resolution X",
+        "default": 1920
+      },
+      "resolution_y": {
+        "type": "integer",
+        "description": "Resolution Y",
+        "default": 1080
+      },
+      "samples": {
+        "type": "integer",
+        "description": "Samples for Cycles render engine"
+      },
+      "engine": {
+        "type": "string",
+        "description": "Render engine (e.g., CYCLES, BLENDER_EEVEE, BLENDER_WORKBENCH)",
+        "default": "CYCLES"
+      },
+      "use_denoising": {
+        "type": "boolean",
+        "description": "Use denoising for Cycles",
+        "default": true
+      },
+      "transparent_bg": {
+        "type": "boolean",
+        "description": "Render with transparent background",
+        "default": false
+  }
+,
+  "setup_scene_environment": {
+    "type": "object",
+    "properties": {
+      "world_color": {
+        "type": "array",
+        "items": {
+          "type": "number"
+        },
+        "default": [0.05, 0.05, 0.05],
+        "description": "World background color [r, g, b]"
+      },
+      "ambient_strength": {
+        "type": "number",
+        "default": 1.0,
+        "description": "Ambient lighting strength"
+      },
+      "use_environment_texture": {
+        "type": "boolean",
+        "default": false,
+        "description": "Use environment texture"
+      },
+      "environment_texture_path": {
+        "type": "string",
+        "default": "",
+        "description": "Path to environment texture file"
+      },
+      "environment_strength": {
+        "type": "number",
+        "default": 1.0,
+        "description": "Environment texture strength"
+      },
+      "use_mist": {
+        "type": "boolean",
+        "default": false,
+        "description": "Use mist effect"
+      },
+      "mist_settings": {
+        "type": "object",
+        "description": "Mist settings",
+        "properties": {
+          "start": {
+            "type": "number",
+            "description": "Mist start distance"
+          },
+          "depth": {
+            "type": "number",
+            "description": "Mist depth"
+          },
+          "falloff": {
+            "type": "string",
+            "enum": ["QUADRATIC", "LINEAR", "INVERSE_QUADRATIC"],
+            "description": "Mist falloff type"
+  }
+,
+  "get_scene_info": {
+    "type": "object",
+    "properties": {}
+  }
+,
+  "update_scene": {
+    "type": "object",
+    "properties": {
+      "frame_current": {
+        "type": "integer",
+        "description": "Current frame number"
+      },
+      "frame_start": {
+        "type": "integer",
+        "description": "Start frame for animation"
+      },
+      "frame_end": {
+        "type": "integer",
+        "description": "End frame for animation"
+      },
+      "fps": {
+        "type": "number",
+        "description": "Frames per second"
+      },
+      "resolution_x": {
+        "type": "integer",
+        "description": "Resolution X"
+      },
+      "resolution_y": {
+        "type": "integer",
+        "description": "Resolution Y"
+      },
+      "resolution_percentage": {
+        "type": "integer",
+        "description": "Resolution percentage"
+      },
+      "render_engine": {
+        "type": "string",
+        "enum": ["BLENDER_EEVEE", "CYCLES", "BLENDER_WORKBENCH"],
+        "description": "Render engine"
+  }
+,
+  "export_scene": {
+    "type": "object",
+    "properties": {
+      "filepath": {
+        "type": "string",
+        "description": "File path to export scene to"
+      },
+      "format": {
+        "type": "string",
+        "default": "FBX",
+        "description": "Export format (e.g., FBX, OBJ, GLB, GLTF, BLEND)",
+        "enum": ["FBX", "OBJ", "GLB", "GLTF", "BLEND"]
+      },
+      "selection_only": {
+        "type": "boolean",
+        "default": false,
+        "description": "Export only selected objects"
+      }
+    },
+    "required": ["filepath"]
+  }
+,
+  "import_file": {
+    "type": "object",
+    "properties": {
+      "filepath": {
+        "type": "string",
+        "description": "Path to the file to import"
+      },
+      "import_as": {
+        "type": "string",
+        "enum": ["APPEND", "LINK", "AUTO"],
+        "description": "Import method for .blend files (APPEND, LINK, AUTO)"
+      }
+    },
+    "required": ["filepath"]
+  }
+,
+  "create_collection": {
+    "type": "object",
+    "properties": {
+      "name": {
+        "type": "string",
+        "default": "New_Collection",
+        "description": "Name for the new collection"
+      },
+      "parent_collection": {
+        "type": "string",
+        "description": "Name of the parent collection to nest under"
+  }
+,
+  "list_collections": {
+    "type": "object",
+    "properties": {}
+  }
+,
+  "delete_collection": {
+    "type": "object",
+    "properties": {
+      "collection_name": {
+        "type": "string",
+        "description": "Name of the collection to delete"
+      },
+      "remove_objects": {
+        "type": "boolean",
+        "default": false,
+        "description": "Also remove objects in the collection"
+      }
+    },
+    "required": ["collection_name"]
+  }
+}
+  }
+}
+  }
+}
+      }
+    }
+  }
+}
+  }
+}

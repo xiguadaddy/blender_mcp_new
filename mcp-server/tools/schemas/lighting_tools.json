@@ -1,0 +1,221 @@
+{
+  "add_light": {
+    "type": "object",
+    "properties": {
+      "light_type": {
+        "type": "string",
+        "enum": ["POINT", "SUN", "SPOT", "AREA"],
+        "description": "Type of light to add"
+      },
+      "location": {
+        "type": "array",
+        "items": {
+          "type": "number"
+        },
+        "default": [0, 0, 0],
+        "description": "Light location [x, y, z]"
+      },
+      "name": {
+        "type": "string",
+        "description": "Light object name"
+      },
+      "color": {
+        "type": "array",
+        "items": {
+          "type": "number"
+        },
+        "default": [1.0, 1.0, 1.0],
+        "description": "RGB color value [r, g, b]"
+      },
+      "energy": {
+        "type": "number",
+        "default": 1000.0,
+        "description": "Light energy/intensity"
+      },
+      "spot_size": {
+        "type": "number",
+        "description": "Spot size for SPOT lights",
+        "default": 1.0
+      },
+      "spot_blend": {
+        "type": "number",
+        "description": "Spot blend factor for SPOT lights",
+        "default": 0.15
+      }
+    },
+    "required": ["light_type"]
+  },
+  "advanced_lighting": {
+    "type": "object",
+    "properties": {
+      "light_type": {
+        "type": "string",
+        "enum": ["POINT", "SUN", "SPOT", "AREA"],
+        "description": "Type of light to add",
+        "default": "AREA"
+      },
+      "name": {
+        "type": "string",
+        "description": "Light object name"
+      },
+      "location": {
+        "type": "array",
+        "items": {
+          "type": "number"
+        },
+        "default": [0, 0, 4],
+        "description": "Light location [x, y, z]"
+      },
+      "rotation": {
+        "type": "array",
+        "items": {
+          "type": "number"
+        },
+        "default": [0, 0, 0],
+        "description": "Light rotation [x, y, z]"
+      },
+      "color": {
+        "type": "array",
+        "items": {
+          "type": "number"
+        },
+        "default": [1, 1, 1],
+        "description": "RGB color value [r, g, b]"
+      },
+      "energy": {
+        "type": "number",
+        "default": 100,
+        "description": "Light energy/intensity"
+      },
+      "settings": {
+        "type": "object",
+        "description": "Advanced light settings",
+        "properties": {
+          "shadow_soft_size": {
+            "type": "number",
+            "description": "Point/Spot light shadow softness",
+            "default": 0.1
+          },
+          "angle": {
+            "type": "number",
+            "description": "Sun light angle",
+            "default": 0.1
+          },
+          "spot_size": {
+            "type": "number",
+            "description": "Spot light size (radians)",
+            "default": 0.785398
+          },
+          "spot_blend": {
+            "type": "number",
+            "description": "Spot light blend factor",
+            "default": 0.15
+          },
+          "shape": {
+            "type": "string",
+            "enum": ["SQUARE", "RECTANGLE", "DISK", "ELLIPSE"],
+            "description": "Area light shape",
+            "default": "SQUARE"
+          },
+          "size": {
+            "type": "number",
+            "description": "Area light size X",
+            "default": 1.0
+          },
+          "size_y": {
+            "type": "number",
+            "description": "Area light size Y (for RECTANGLE/ELLIPSE)",
+            "default": 1.0
+          },
+          "use_shadow": {
+            "type": "boolean",
+            "description": "Enable shadows",
+            "default": true
+          },
+          "shadow_clip_start": {
+            "type": "number",
+            "description": "Shadow clip start",
+            "default": 0.1
+          },
+          "shadow_clip_end": {
+            "type": "number",
+            "description": "Shadow clip end",
+            "default": 100.0
+          },
+          "use_nodes": {
+            "type": "boolean",
+            "description": "Use node-based light shader",
+            "default": false
+  }
+,
+  "update_light": {
+    "type": "object",
+    "properties": {
+      "light_name": {
+        "type": "string",
+        "description": "Name of the light object to update"
+      },
+      "color": {
+        "type": "array",
+        "items": {
+          "type": "number"
+        },
+        "description": "RGB color value [r, g, b]"
+      },
+      "energy": {
+        "type": "number",
+        "description": "Light energy/intensity"
+      },
+      "location": {
+        "type": "array",
+        "items": {
+          "type": "number"
+        },
+        "description": "Light location [x, y, z]"
+      },
+      "rotation": {
+        "type": "array",
+        "items": {
+          "type": "number"
+        },
+        "description": "Light rotation [x, y, z]"
+      }
+    },
+    "required": ["light_name"]
+  }
+,
+  "get_light_info": {
+    "type": "object",
+    "properties": {
+      "light_name": {
+        "type": "string",
+        "description": "Name of the light object to get info for"
+      }
+    },
+    "required": ["light_name"]
+  },
+  "list_lights": {
+    "type": "object",
+    "properties": {}
+  },
+  "delete_light": {
+    "type": "object",
+    "properties": {
+      "light_names": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "List of light names to delete"
+      },
+      "light_name": {
+        "type": "string",
+        "description": "Name of a single light to delete (deprecated, use light_names instead)"
+      }
+    }
+  }
+}
+      }
+    }
+  }
+}

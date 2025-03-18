@@ -1,0 +1,28 @@
+{
+  "//": "JSON schemas for tools in animation_tools.py will be defined here",
+  "create_animation": {
+    "type": "object",
+    "properties": {
+      "object_name": {
+        "type": "string",
+        "description": "要创建动画的物体名称"
+      },
+      "keyframes": {
+        "type": "object",
+        "description": "关键帧数据，帧数作为键，属性值作为值",
+        "additionalProperties": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          }
+        }
+      },
+      "property_path": {
+        "type": "string",
+        "default": "location",
+        "description": "动画属性路径 (location, rotation_euler, scale, 或其他属性路径)"
+      }
+    },
+    "required": ["object_name", "keyframes"]
+  }
+}

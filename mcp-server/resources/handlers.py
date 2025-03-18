@@ -13,6 +13,7 @@ def register_resource_handlers(server, ipc_client):
         try:
             # 通过IPC获取实际资源列表
             blender_resources = await ipc_client.send_request({"action": "list_resources"})
+            print(f"MCP服务器：获取到的资源列表: {blender_resources}")
             
             # 资源列表必须包含至少一个有效资源
             resources = []
