@@ -27,6 +27,8 @@ def execute_in_main_thread(func, *args, **kwargs):
 
 def execute_tool(tool_name, arguments):
     """执行指定工具"""
+    from .tools import register_all_tools
+    
     print(f"执行工具: {tool_name}, 参数: {arguments}")
     
     # 执行Python代码
@@ -44,10 +46,13 @@ def execute_tool(tool_name, arguments):
         except Exception as e:
             return {"error": f"执行Python代码时出错: {str(e)}"}
     
+    # 获取所有注册的工具
+    tools = register_all_tools()
+    
     with _tool_lock:
         try:
-            if tool_name in TOOLS:
-                return TOOLS[tool_name](arguments)
+            if tool_name in tools:
+                return tools[tool_name](arguments)
             else:
                 error_msg = f"未知工具: {tool_name}"
                 logger.error(error_msg)
@@ -1365,10 +1370,15 @@ def advanced_lighting(args):
 
 def list_tools():
     """返回可用工具列表"""
+    from .tools import register_all_tools
+    
     logger.debug("列出可用工具")
     
+    # 获取所有注册的工具
+    tools_dict = register_all_tools()
+    
     tools = []
-    for tool_name, tool_func in TOOLS.items():
+    for tool_name, tool_func in tools_dict.items():
         # 获取工具的docstring作为描述
         description = tool_func.__doc__ or f"执行{tool_name}操作"
         
@@ -1386,7 +1396,7 @@ def list_tools():
                 "properties": {
                     "object_type": {
                         "type": "string",
-                        "enum": ["cube", "sphere", "plane", "cylinder", "cone", "torus"],
+                        "enum": ["cube", "sphere", "plane", "cylinder", "cone", "torus", "empty"],
                         "description": "要创建的对象类型"
                     },
                     "location": {
@@ -1449,29 +1459,3 @@ def list_tools():
         tools.append(tool_info)
     
     return tools
-
-# TOOLS字典定义...
-TOOLS = {
-    "create_object": create_object,
-    "set_material": set_material,
-    "add_light": add_light,
-    "set_camera": set_camera,
-    "render_scene": render_scene,
-    "apply_modifier": apply_modifier,
-    "transform_object": transform_object,
-    "import_model": import_model,
-    # 新增高级建模功能
-    "extrude_faces": extrude_faces,
-    "subdivide_mesh": subdivide_mesh,
-    "loop_cut": loop_cut,
-    "set_vertex_position": set_vertex_position,
-    "create_animation": create_animation,
-    "create_node_material": create_node_material,
-    "set_uv_mapping": set_uv_mapping,
-    "join_objects": join_objects,
-    "separate_mesh": separate_mesh,
-    "create_text": create_text,
-    "create_curve": create_curve,
-    "create_particle_system": create_particle_system,
-    "advanced_lighting": advanced_lighting,
-}

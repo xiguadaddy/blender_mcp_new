@@ -61,7 +61,7 @@ Blender MCP项目实现了[Model Context Protocol (MCP)](https://modelcontextpro
 1. **克隆仓库**
    ```bash
    git clone https://github.com/xiguadaddy/blender_mcp_new.git
-   cd blender-mcp
+   cd blender_mcp_new
    ```
 
 2. **安装MCP服务器核心**
@@ -87,8 +87,7 @@ Blender MCP项目实现了[Model Context Protocol (MCP)](https://modelcontextpro
 
 2. **启动MCP服务器核心**
    ```bash
-   cd mcp-server
-   python main.py
+   python start_server.py
    ```
 
 ### 配置Claude客户端
@@ -99,7 +98,7 @@ Blender MCP项目实现了[Model Context Protocol (MCP)](https://modelcontextpro
   "mcpServers": {
     "blender": {
       "command": "python",
-      "args": ["/path/to/blender-mcp/mcp-server/main.py"]
+      "args": ["/path/to/blender-mcp_new/start_server.py"]
     }
   }
 }
