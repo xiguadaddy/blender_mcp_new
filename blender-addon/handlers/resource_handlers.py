@@ -8,6 +8,82 @@ import logging
 # 设置日志
 logger = logging.getLogger("BlenderMCP.Resources")
 
+# 资源变更跟踪变量
+resource_state = {
+    "objects": {},       # 对象状态
+    "materials": {},     # 材质状态
+    "lights": {},        # 灯光状态
+    "cameras": {},       # 相机状态
+    "scene": {           # 场景状态
+        "frame": 0,      # 当前帧
+    }
+}
+
+def update_resource_state():
+    """更新资源状态，检测变化，并返回变化的资源URI列表"""
+    changed_resources = []
+    
+    # 检查对象变化
+    for obj in bpy.context.scene.objects:
+        obj_id = obj.name
+        obj_type = obj.type.lower()
+        
+        # 对象位置和旋转的哈希
+        obj_state = f"{obj.location}|{obj.rotation_euler}|{obj.scale}"
+        
+        # 检查这个对象是否是新的或已更改
+        if obj_type not in resource_state["objects"]:
+            resource_state["objects"][obj_type] = {}
+            
+        if obj_id not in resource_state["objects"][obj_type] or resource_state["objects"][obj_type][obj_id] != obj_state:
+            resource_state["objects"][obj_type][obj_id] = obj_state
+            changed_resources.append(f"blender://{obj_type}/{obj_id}")
+    
+    # 检查材质变化
+    for mat in bpy.data.materials:
+        mat_id = mat.name
+        
+        # 简单地使用修改时间作为状态
+        if mat.use_nodes and mat.node_tree:
+            mat_state = str(mat.node_tree.nodes.values())
+        else:
+            mat_state = str(mat.diffuse_color)
+            
+        if mat_id not in resource_state["materials"] or resource_state["materials"][mat_id] != mat_state:
+            resource_state["materials"][mat_id] = mat_state
+            changed_resources.append(f"blender://material/{mat_id}")
+    
+    # 检查灯光变化
+    for light in [obj for obj in bpy.context.scene.objects if obj.type == 'LIGHT']:
+        light_id = light.name
+        light_data = light.data
+        
+        # 灯光状态包括位置、颜色和能量
+        light_state = f"{light.location}|{light_data.color}|{light_data.energy}"
+        
+        if light_id not in resource_state["lights"] or resource_state["lights"][light_id] != light_state:
+            resource_state["lights"][light_id] = light_state
+            changed_resources.append(f"blender://light/{light_id}")
+    
+    # 检查相机变化
+    for camera in [obj for obj in bpy.context.scene.objects if obj.type == 'CAMERA']:
+        camera_id = camera.name
+        camera_data = camera.data
+        
+        # 相机状态包括位置、旋转和视场
+        camera_state = f"{camera.location}|{camera.rotation_euler}|{camera_data.lens}"
+        
+        if camera_id not in resource_state["cameras"] or resource_state["cameras"][camera_id] != camera_state:
+            resource_state["cameras"][camera_id] = camera_state
+            changed_resources.append(f"blender://camera/{camera_id}")
+    
+    # 检查场景变化
+    if bpy.context.scene.frame_current != resource_state["scene"]["frame"]:
+        resource_state["scene"]["frame"] = bpy.context.scene.frame_current
+        changed_resources.append("blender://scene/current")
+    
+    return changed_resources
+
 def check_object_exists(object_name):
     """检查对象是否存在"""
     exists = object_name in bpy.data.objects
@@ -48,7 +124,7 @@ def handle_list_resources():
         resources.append({
             "type": "camera",
             "id": camera.name,
-            "name": light.name
+            "name": camera.name
         })
     
     # 添加场景本身

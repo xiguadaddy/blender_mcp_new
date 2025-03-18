@@ -3,6 +3,7 @@ import socket
 import asyncio
 import sys
 import os
+import traceback
 
 class IPCClient:
     """负责与Blender插件通信的IPC客户端"""
@@ -49,6 +50,10 @@ class IPCClient:
     async def send_request(self, data):
         """异步发送请求并获取响应"""
         try:
+            # 优化特定请求类型
+            if data.get("action") == "call_tool" and data.get("tool") == "set_material":
+                data = self._optimize_material_request(data)
+
             message = json.dumps(data)
             
             # 创建异步任务来发送数据
@@ -74,7 +79,41 @@ class IPCClient:
             return json.loads(response_data.decode())
         except Exception as e:
             print(f"发送请求时出错: {str(e)}")
+            traceback.print_exc()
             return {"error": str(e)}
+    
+    def _optimize_material_request(self, request):
+        """优化材质相关请求
+        
+        参数:
+            request: 原始请求
+            
+        返回:
+            优化后的请求
+        """
+        # 复制请求以避免修改原始请求
+        optimized = request.copy()
+        arguments = optimized.get("arguments", {}).copy()
+        
+        # 确保颜色格式正确 (支持RGB和RGBA)
+        if "color" in arguments:
+            color = arguments["color"]
+            if color and isinstance(color, list):
+                # 如果是RGB格式，添加Alpha通道
+                if len(color) == 3:
+                    arguments["color"] = color + [1.0]
+                    print(f"材质优化: 为颜色添加Alpha通道 {color} -> {arguments['color']}")
+                # 确保所有颜色值在0-1范围内
+                arguments["color"] = [max(0.0, min(c, 1.0)) for c in arguments["color"]]
+        
+        # 确保金属度和粗糙度在有效范围内
+        for param in ["metallic", "roughness", "specular"]:
+            if param in arguments:
+                arguments[param] = max(0.0, min(arguments[param], 1.0))
+        
+        # 更新请求参数
+        optimized["arguments"] = arguments
+        return optimized
     
     def close(self):
         """关闭连接"""

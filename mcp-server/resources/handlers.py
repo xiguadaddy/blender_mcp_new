@@ -14,29 +14,46 @@ def register_resource_handlers(server, ipc_client):
             # 通过IPC获取实际资源列表
             blender_resources = await ipc_client.send_request({"action": "list_resources"})
             
-            if "error" in blender_resources:
-                print(f"获取资源列表时出错: {blender_resources['error']}")
-                # 返回基本资源列表作为后备
+            # 资源列表必须包含至少一个有效资源
+            resources = []
+            
+            if not blender_resources or "error" in blender_resources:
+                print(f"获取资源列表时出错或资源列表为空，使用默认资源")
+                # 返回默认资源列表
                 resources = [
                     types.Resource(
                         uri="blender://scene/current",
+                        name="当前Blender场景",
                         description="当前Blender场景信息"
                     ),
                     types.Resource(
                         uri="blender://mesh/default",
+                        name="默认网格对象",
                         description="默认网格对象"
                     )
                 ]
             else:
                 # 将Blender资源转换为MCP资源
-                resources = []
                 for res in blender_resources:
-                    resources.append(
-                        types.Resource(
-                            uri=f"blender://{res['type']}/{res['id']}",
-                            description=res['name']
+                    # 确保资源类型和ID是有效的
+                    if 'type' in res and 'id' in res and 'name' in res:
+                        resources.append(
+                            types.Resource(
+                                uri=f"blender://{res['type']}/{res['id']}",
+                                name=res['name'],
+                                description=f"Blender {res['type']}: {res['name']}"
+                            )
                         )
+            
+            # 如果资源列表为空，添加一个默认资源
+            if not resources:
+                resources.append(
+                    types.Resource(
+                        uri="blender://scene/current",
+                        name="当前Blender场景",
+                        description="当前Blender场景信息"
                     )
+                )
             
             print(f"MCP服务器：返回 {len(resources)} 个资源")
             return resources
@@ -47,6 +64,7 @@ def register_resource_handlers(server, ipc_client):
             return [
                 types.Resource(
                     uri="blender://scene/current",
+                    name="当前Blender场景",
                     description="当前Blender场景信息"
                 )
             ]
@@ -159,8 +177,14 @@ def register_resource_handlers(server, ipc_client):
     @server.subscribe_resource()
     async def handle_subscribe_resources():
         """实现资源订阅功能"""
-        # 暂不实现完整资源订阅，仅返回空列表
-        return []
+        # 返回可订阅资源的列表
+        return [
+            types.Resource(
+                uri="blender://scene/current",
+                name="当前Blender场景",
+                description="当前Blender场景及其所有对象和属性"
+            )
+        ]
     
     # 添加一个辅助函数来发送资源更新通知
     async def notify_resource_updated(uri):

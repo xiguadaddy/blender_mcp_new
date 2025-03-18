@@ -51,10 +51,14 @@ def register_tool_handlers(server, ipc_client):
                             "type": "string",
                             "description": "目标对象名称"
                         },
+                        "material_name": {
+                            "type": "string",
+                            "description": "材质名称（如果不提供则自动生成）"
+                        },
                         "color": {
                             "type": "array",
                             "items": {"type": "number"},
-                            "description": "RGBA颜色值 [r, g, b, a]"
+                            "description": "RGBA颜色值 [r, g, b, a]，或RGB颜色值 [r, g, b]"
                         },
                         "metallic": {
                             "type": "number",
@@ -63,6 +67,11 @@ def register_tool_handlers(server, ipc_client):
                         "roughness": {
                             "type": "number",
                             "description": "粗糙度(0-1)"
+                        },
+                        "specular": {
+                            "type": "number",
+                            "description": "镜面反射强度(0-1)",
+                            "default": 0.5
                         }
                     },
                     "required": ["object_name"]
@@ -252,6 +261,97 @@ def register_tool_handlers(server, ipc_client):
                     },
                     "required": ["code"]
                 }
+            ),
+            
+            # 10. 挤出面工具
+            types.Tool(
+                name="extrude_faces",
+                description="挤出面",
+                inputSchema=EXTRUDE_FACES_SCHEMA
+            ),
+            
+            # 11. 细分网格工具
+            types.Tool(
+                name="subdivide_mesh",
+                description="细分网格",
+                inputSchema=SUBDIVIDE_MESH_SCHEMA
+            ),
+            
+            # 12. 环切工具
+            types.Tool(
+                name="loop_cut",
+                description="环切",
+                inputSchema=LOOP_CUT_SCHEMA
+            ),
+            
+            # 13. 设置顶点位置工具
+            types.Tool(
+                name="set_vertex_position",
+                description="设置顶点位置",
+                inputSchema=SET_VERTEX_POSITION_SCHEMA
+            ),
+            
+            # 14. 创建动画工具
+            types.Tool(
+                name="create_animation",
+                description="创建动画",
+                inputSchema=CREATE_ANIMATION_SCHEMA
+            ),
+            
+            # 15. 创建节点材质工具
+            types.Tool(
+                name="create_node_material",
+                description="创建节点材质",
+                inputSchema=CREATE_NODE_MATERIAL_SCHEMA
+            ),
+            
+            # 16. 设置UV映射工具
+            types.Tool(
+                name="set_uv_mapping",
+                description="设置UV映射",
+                inputSchema=SET_UV_MAPPING_SCHEMA
+            ),
+            
+            # 17. 合并对象工具
+            types.Tool(
+                name="join_objects",
+                description="合并对象",
+                inputSchema=JOIN_OBJECTS_SCHEMA
+            ),
+            
+            # 18. 分离网格工具
+            types.Tool(
+                name="separate_mesh",
+                description="分离网格",
+                inputSchema=SEPARATE_MESH_SCHEMA
+            ),
+            
+            # 19. 创建文本工具
+            types.Tool(
+                name="create_text",
+                description="创建3D文本",
+                inputSchema=CREATE_TEXT_SCHEMA
+            ),
+            
+            # 20. 创建曲线工具
+            types.Tool(
+                name="create_curve",
+                description="创建曲线",
+                inputSchema=CREATE_CURVE_SCHEMA
+            ),
+            
+            # 21. 创建粒子系统工具
+            types.Tool(
+                name="create_particle_system",
+                description="创建粒子系统",
+                inputSchema=CREATE_PARTICLE_SYSTEM_SCHEMA
+            ),
+            
+            # 22. 高级灯光工具
+            types.Tool(
+                name="advanced_lighting",
+                description="创建高级灯光",
+                inputSchema=ADVANCED_LIGHTING_SCHEMA
             )
         ]
         
