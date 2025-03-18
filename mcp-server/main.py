@@ -8,6 +8,7 @@ import mcp.server.stdio
 import sys
 from mcp.server import NotificationOptions
 import os
+import mcp.server.models
 
 print("="*50)
 print("MCP服务器启动")
@@ -36,11 +37,25 @@ async def main():
     async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
         print("MCP服务器: 准备启动服务器")
         server_name = "blender-mcp"
-        server_version = "0.1.0"
+        server_version = "0.2.0"
+        
+        # 检查NotificationOptions的正确用法
+        print("检查NotificationOptions参数...")
+        try:
+            # 尝试无参数初始化
+            notification_options = NotificationOptions()
+            print("使用默认NotificationOptions")
+        except Exception as e:
+            print(f"NotificationOptions初始化错误: {e}")
+            # 如果失败，使用空字典
+            notification_options = {}
+        
+        # 获取服务器能力
         capabilities = server.get_capabilities(
-            notification_options=NotificationOptions(),
+            notification_options=notification_options,
             experimental_capabilities={},
         )
+        
         print(f"服务器信息: name={server_name}, version={server_version}")
         print(f"服务器能力: {capabilities}")
         print(f"MCP SDK 版本: {mcp.__version__ if hasattr(mcp, '__version__') else '未知'}")

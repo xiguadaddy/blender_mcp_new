@@ -60,7 +60,7 @@ Blender MCP项目实现了[Model Context Protocol (MCP)](https://modelcontextpro
 
 1. **克隆仓库**
    ```bash
-   git clone https://github.com/your-username/blender-mcp.git
+   git clone https://github.com/xiguadaddy/blender_mcp_new.git
    cd blender-mcp
    ```
 

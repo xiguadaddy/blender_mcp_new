@@ -11,6 +11,9 @@ def create_server(ipc_client):
     # 正确初始化Server
     server = Server("blender-mcp")
     
+    # 注意：不在这里创建NotificationOptions
+    # 服务器使用get_capabilities时会提供正确的NotificationOptions
+    
     # 注册常规处理程序
     print("注册资源处理程序...")
     register_resource_handlers(server, ipc_client)
