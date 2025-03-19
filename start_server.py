@@ -2,6 +2,7 @@ import os
 import sys
 import subprocess
 import platform
+import socket
 
 # 设置工作目录
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -28,10 +29,24 @@ script_path = os.path.join("mcp-server", "main.py")
 print(f"使用Python解释器: {python_executable}")
 print(f"启动MCP服务器: {script_path}")
 
+# 使用固定端口27015，与测试脚本保持一致
+ipc_port = 27015
+socket_path = f"port:{ipc_port}"
+print(f"使用IPC通信端口: {ipc_port}")
+
+# 构建服务器启动命令
+server_args = [
+    "--socket-path", socket_path,
+    "--debug",                          # 启用调试模式
+    "--protocol-version", "0.3.0",      # MCP协议版本
+    "--retry-count", "5",               # 增加连接重试次数
+    "--retry-delay", "2.0"              # 增加重试延迟(秒)
+]
+
 # 启动服务器，并确保输出被转发
 try:
     process = subprocess.Popen(
-        [python_executable, script_path], 
+        [python_executable, script_path] + server_args,
         stdout=sys.stdout, 
         stderr=sys.stderr
     )

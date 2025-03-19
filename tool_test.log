@@ -1,0 +1,5 @@
+2025-03-19 21:59:19,303 - BlenderMCPToolTest - INFO - ======= 开始Blender MCP工具测试 =======
+2025-03-19 21:59:19,303 - BlenderMCPToolTest - INFO - ===== 测试：创建立方体 =====
+2025-03-19 21:59:21,347 - BlenderMCPToolTest - ERROR - 请求过程中出错: [WinError 10061] 由于目标计算机积极拒绝，无法连接。
+2025-03-19 21:59:21,347 - BlenderMCPToolTest - ERROR - 测试创建立方体时出错: [WinError 10061] 由于目标计算机积极拒绝，无法连接。
+2025-03-19 21:59:21,348 - BlenderMCPToolTest - INFO - ======= 测试完成 =======
