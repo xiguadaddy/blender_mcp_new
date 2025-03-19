@@ -1,4 +1,3 @@
-
 # Blender MCP - Model Context Protocol与Blender集成
 
 Blender MCP项目实现了[Model Context Protocol (MCP)](https://modelcontextprotocol.io/)与Blender之间的集成，使AI模型（如Claude）能够直接与Blender交互，进行3D建模、渲染和场景操作。
@@ -76,6 +75,52 @@ Blender MCP项目实现了[Model Context Protocol (MCP)](https://modelcontextpro
    - 点击"安装..."，选择`blender-addon`目录生成的ZIP文件
    - 勾选插件以激活它
 
+## API调用格式
+
+Blender MCP服务器支持两种类型的API请求格式：
+
+### 1. 方法请求 (Method)
+
+用于MCP标准操作，如获取工具列表和资源列表：
+
+```json
+{
+    "method": "mcp/listTools",
+    "params": {}
+}
+```
+
+```json
+{
+    "method": "mcp/listResources",
+    "params": {}
+}
+```
+
+### 2. 操作请求 (Action)
+
+用于直接工具操作，如调用Blender工具：
+
+```json
+{
+    "action": "call_tool",
+    "tool": "create_object",
+    "arguments": {
+        "object_type": "cube",
+        "name": "TestCube",
+        "location": [0, 0, 0],
+        "size": 2.0
+    }
+}
+```
+
+### API请求注意事项
+
+- **工具调用**：必须使用`action`字段，不要使用`method`字段
+- **消息格式**：所有请求和响应都是JSON格式，需要添加长度前缀
+- **长度前缀**：消息以`{长度}:`为前缀，如`125:{"action":"call_tool",...}`
+- **工具参数**：参数格式取决于特定工具，请参考工具列表获取详情
+
 ## 使用方法
 
 ### 启动服务
@@ -113,6 +158,80 @@ Blender MCP项目实现了[Model Context Protocol (MCP)](https://modelcontextpro
 
 Claude会使用MCP工具与Blender交互，创建所需的对象。
 
+## 测试示例
+
+我们提供了一些测试脚本来演示如何直接与MCP服务器通信：
+
+### 创建红色立方体测试
+
+`tests/test_cube.py`是一个完整的测试示例，演示了：
+1. 如何连接到MCP服务器
+2. 如何发送创建立方体的请求
+3. 如何为立方体设置红色材质
+
+运行测试：
+```bash
+python tests/test_cube.py
+```
+
+测试代码示例：
+```python
+async def test_create_cube():
+    """测试创建立方体"""
+    params = {
+        "action": "call_tool",
+        "tool": "create_object",
+        "arguments": {
+            "object_type": "cube",
+            "name": "TestCube",
+            "location": [0, 0, 0],
+            "size": 2.0
+        }
+    }
+    
+    response = await send_request(None, params)
+    
+    if response and not response.get("error"):
+        return "TestCube"  # 返回对象名称
+    else:
+        return None
+
+async def test_set_material(object_name):
+    """测试设置红色材质"""
+    params = {
+        "action": "call_tool",
+        "tool": "set_material",
+        "arguments": {
+            "object_name": object_name,
+            "material_name": "RedMaterial",
+            "color": [1.0, 0.0, 0.0, 1.0],  # 红色 RGBA
+            "metallic": 0.0,
+            "roughness": 0.5
+        }
+    }
+    
+    response = await send_request(None, params)
+    
+    if response and not response.get("error"):
+        return True
+    else:
+        return False
+```
+
+### 获取工具列表
+
+查看Blender MCP中所有可用的工具：
+```bash
+python tests/test_list_tools.py tools
+```
+
+### 获取资源列表
+
+查看当前场景中所有可用的资源：
+```bash
+python tests/test_list_tools.py resources
+```
+
 ## 项目结构
 
 ```
@@ -125,12 +244,16 @@ blender-mcp/
 │   ├── tools/                       # 工具实现
 │   └── prompts/                     # 提示模板
 │
-└── blender-addon/                   # Blender插件
-    ├── __init__.py                  # 插件入口点
-    ├── addon/                       # 插件UI和操作符
-    ├── ipc/                         # IPC通信
-    ├── handlers/                    # 请求处理
-    └── utils/                       # 辅助工具
+├── blender-addon/                   # Blender插件
+│   ├── __init__.py                  # 插件入口点
+│   ├── addon/                       # 插件UI和操作符
+│   ├── ipc/                         # IPC通信
+│   ├── handlers/                    # 请求处理
+│   └── utils/                       # 辅助工具
+│
+└── tests/                           # 测试脚本
+    ├── test_list_tools.py           # 测试工具列表
+    └── test_cube.py                 # 测试创建立方体
 ```
 
 ## 调试与测试
@@ -144,11 +267,17 @@ blender-mcp/
    - "创建测试对象"按钮可快速创建测试立方体
    - "查看资源"按钮可列出当前场景中的资源
 
+3. **日志文件**
+   - Blender插件日志: `%TEMP%/blender_mcp_ui.log`
+   - 测试脚本日志: `%TEMP%/blender_mcp_test.log`
+   - MCP服务器日志: 控制台输出
+
 ## 已知问题和限制
 
 - Windows平台路径兼容性：Unix socket路径在Windows上需使用命名管道
 - 大型网格数据传输性能：大型模型的资源数据可能受IPC通信限制
 - 多线程渲染支持有限：某些高级渲染功能可能不完全支持
+- 资源列表获取可能较慢：已添加超时保护，但大型场景仍可能需要较长时间
 
 ## 未来计划
 

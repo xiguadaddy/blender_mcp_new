@@ -21,7 +21,7 @@ def render_scene(args):
     logger.debug(f"渲染场景: {args}")
     
     # 解析参数
-    output_path = args.get("output_path", "")
+    output_path = args.get("output_path", "//render")
     output_format = args.get("output_format", "PNG")
     resolution_x = args.get("resolution_x", 1920)
     resolution_y = args.get("resolution_y", 1080)
@@ -35,86 +35,33 @@ def render_scene(args):
             # 获取当前场景
             scene = bpy.context.scene
             
-            # 保存原始设置用于后续恢复
-            original_settings = {
-                "engine": scene.render.engine,
-                "resolution_x": scene.render.resolution_x,
-                "resolution_y": scene.render.resolution_y,
-                "resolution_percentage": scene.render.resolution_percentage,
-                "file_format": scene.render.image_settings.file_format,
-                "filepath": scene.render.filepath,
-                "film_transparent": scene.render.film_transparent
-            }
-            
-            if engine == "CYCLES" and hasattr(scene.cycles, "samples"):
-                original_settings["cycles_samples"] = scene.cycles.samples
-                original_settings["use_denoising"] = scene.cycles.use_denoising
-            
-            # 设置渲染引擎
-            scene.render.engine = engine
-            
-            # 设置分辨率
-            scene.render.resolution_x = resolution_x
-            scene.render.resolution_y = resolution_y
-            scene.render.resolution_percentage = 100
-            
-            # 设置输出格式
-            scene.render.image_settings.file_format = output_format
-            
-            # 设置透明背景
-            scene.render.film_transparent = transparent_bg
-            
-            # 如果使用Cycles引擎，设置相关参数
-            if engine == "CYCLES":
-                # 设置采样数
-                if samples is not None and hasattr(scene.cycles, "samples"):
-                    scene.cycles.samples = samples
-                
-                # 设置降噪
-                if hasattr(scene.cycles, "use_denoising"):
-                    scene.cycles.use_denoising = use_denoising
-            
-            # 处理输出路径
-            if not output_path:
-                # 创建临时文件夹
-                temp_dir = tempfile.gettempdir()
-                output_path = os.path.join(temp_dir, f"render_{hash(tuple(args.items()))}.{output_format.lower()}")
-            
             # 确保输出目录存在
-            output_dir = os.path.dirname(output_path)
-            if output_dir and not os.path.exists(output_dir):
-                os.makedirs(output_dir, exist_ok=True)
+            output_dir = bpy.path.abspath(output_path)
+            os.makedirs(os.path.dirname(output_dir), exist_ok=True)
             
-            # 设置输出路径
+            # 保存原始设置
+            original_path = scene.render.filepath
+            
+            # 设置新路径
             scene.render.filepath = output_path
+            
+            # 强制更新渲染设置
+            scene.render.resolution_percentage = scene.render.resolution_percentage
             
             # 执行渲染
             bpy.ops.render.render(write_still=True)
             
-            # 恢复原始设置
-            scene.render.engine = original_settings["engine"]
-            scene.render.resolution_x = original_settings["resolution_x"]
-            scene.render.resolution_y = original_settings["resolution_y"]
-            scene.render.resolution_percentage = original_settings["resolution_percentage"]
-            scene.render.image_settings.file_format = original_settings["file_format"]
-            scene.render.filepath = original_settings["filepath"]
-            scene.render.film_transparent = original_settings["film_transparent"]
-            
-            if engine == "CYCLES" and "cycles_samples" in original_settings:
-                scene.cycles.samples = original_settings["cycles_samples"]
-                if "use_denoising" in original_settings:
-                    scene.cycles.use_denoising = original_settings["use_denoising"]
+            # 恢复设置
+            scene.render.filepath = original_path
             
             return {
                 "status": "success",
-                "render_path": output_path,
-                "resolution": [resolution_x, resolution_y],
-                "engine": engine
+                "output_path": output_path
             }
-            
         except Exception as e:
-            logger.error(f"渲染场景时出错: {str(e)}")
-            return {"error": str(e)}
+            error_msg = f"渲染场景时出错: {str(e)}"
+            logger.error(error_msg)
+            return {"error": error_msg}
             
     return execute_in_main_thread(exec_func)
 

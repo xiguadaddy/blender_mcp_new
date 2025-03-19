@@ -1,74 +1,52 @@
+import logging
+import json
+from mcp.server import Server
 import mcp.types as types
 from pydantic import AnyUrl
-import json
+
+# 配置日志
+logger = logging.getLogger("BlenderMCP.Server")
 
 def register_resource_handlers(server, ipc_client):
-    """注册资源相关的处理程序"""
+    """注册所有Blender资源处理器"""
     
     @server.list_resources()
     async def handle_list_resources():
-        """列出可用的Blender资源"""
-        print("===== MCP服务器：开始处理list_resources请求 =====")
+        """处理资源列表请求"""
+        logger.debug("处理资源列表请求")
         
         try:
-            # 通过IPC获取实际资源列表
-            blender_resources = await ipc_client.send_request({"action": "list_resources"})
-            print(f"MCP服务器：获取到的资源列表: {blender_resources}")
+            # 通过IPC获取Blender中的所有资源
+            resources_data = ipc_client.send_request({"action": "list_resources"})
             
-            # 资源列表必须包含至少一个有效资源
-            resources = []
-            
-            if not blender_resources or "error" in blender_resources:
-                print(f"获取资源列表时出错或资源列表为空，使用默认资源")
-                # 返回默认资源列表
-                resources = [
-                    types.Resource(
-                        uri="blender://scene/current",
-                        name="当前Blender场景",
-                        description="当前Blender场景信息"
-                    ),
-                    types.Resource(
-                        uri="blender://mesh/default",
-                        name="默认网格对象",
-                        description="默认网格对象"
-                    )
-                ]
-            else:
-                # 将Blender资源转换为MCP资源
-                for res in blender_resources:
-                    # 确保资源类型和ID是有效的
-                    if 'type' in res and 'id' in res and 'name' in res:
-                        resources.append(
-                            types.Resource(
-                                uri=f"blender://{res['type']}/{res['id']}",
-                                name=res['name'],
-                                description=f"Blender {res['type']}: {res['name']}"
-                            )
-                        )
-            
-            # 如果资源列表为空，添加一个默认资源
-            if not resources:
-                resources.append(
-                    types.Resource(
-                        uri="blender://scene/current",
-                        name="当前Blender场景",
-                        description="当前Blender场景信息"
-                    )
+            # 转换为MCP资源格式
+            mcp_resources = []
+            for res in resources_data:
+                # 构建资源URI
+                uri = f"blender://{res['type']}/{res['id']}"
+                
+                # 获取MIME类型
+                mime_type = "application/json"
+                if res['type'] == 'image':
+                    mime_type = "image/png"
+                elif res['type'] == 'video':
+                    mime_type = "video/mp4"
+                elif res['type'] == 'audio':
+                    mime_type = "audio/wav"
+                
+                # 构建MCP资源对象
+                mcp_resource = types.Resource(
+                    uri=uri,
+                    name=res["name"],
+                    mimeType=mime_type
                 )
+                mcp_resources.append(mcp_resource)
             
-            print(f"MCP服务器：返回 {len(resources)} 个资源")
-            return resources
-            
+            logger.info(f"返回 {len(mcp_resources)} 个可用资源")
+            return mcp_resources
         except Exception as e:
-            print(f"处理资源列表请求时出错: {str(e)}")
-            # 返回最小资源列表作为回退选项
-            return [
-                types.Resource(
-                    uri="blender://scene/current",
-                    name="当前Blender场景",
-                    description="当前Blender场景信息"
-                )
-            ]
+            logger.error(f"获取资源列表时出错: {str(e)}")
+            return []
     
     @server.list_resource_templates()
     async def handle_list_resource_templates():
@@ -102,77 +80,68 @@ def register_resource_handlers(server, ipc_client):
         ]
     
     @server.read_resource()
-    async def handle_read_resource(uri: str, path_params: dict | None = None):
-        """读取资源内容"""
-        print(f"MCP服务器：读取资源 {uri}")
-        path_params = path_params or {}
+    async def handle_read_resource(uri):
+        """处理资源读取请求"""
+        logger.debug(f"读取资源: {uri}")
         
         try:
             # 解析URI
+            # 例如: blender://mesh/Cube
             parts = uri.split('/')
+            if len(parts) < 4 or parts[0] != "blender:":
+                raise ValueError(f"无效的资源URI: {uri}")
             
-            if len(parts) < 3:
-                return types.TextContent(
-                    type="text",
-                    text=json.dumps({"error": f"无效的资源URI: {uri}"})
-                )
+            resource_type = parts[2]
+            resource_id = parts[3]
             
-            # 提取资源类型和ID
-            resource_type = parts[2]  # 例如从blender://mesh/Cube中提取mesh
-            resource_id = parts[3] if len(parts) > 3 else None
-            
-            # 检查对象是否存在（如果是mesh类型资源）
-            if resource_type == "mesh" and resource_id:
-                exists = await ipc_client.check_object_exists(resource_id)
-                if not exists:
-                    return types.TextContent(
-                        type="text",
-                        text=json.dumps({"error": f"对象不存在: {resource_id}"})
-                    )
-            
-            # 通过IPC请求获取资源数据
-            request = {
+            # 通过IPC获取资源数据
+            resource_data = ipc_client.send_request({
                 "action": "read_resource",
                 "type": resource_type,
                 "id": resource_id
-            }
+            })
             
-            resource_data = await ipc_client.send_request(request)
-            
+            # 检查是否有错误
             if "error" in resource_data:
-                return types.TextContent(
-                    type="text",
-                    text=json.dumps({"error": resource_data["error"]})
+                logger.error(f"读取资源出错: {resource_data['error']}")
+                return types.ReadResourceResult(
+                    isError=True,
+                    content=[types.TextContent(
+                        type="text",
+                        text=f"读取资源出错: {resource_data['error']}"
+                    )]
                 )
             
-            # 处理特定类型资源的格式化
-            if resource_type == "mesh":
-                # 为网格数据添加额外信息，使其更易读
-                if "vertices_count" in resource_data:
-                    resource_data["description"] = f"网格对象，包含 {resource_data['vertices_count']} 个顶点和 {resource_data['faces_count']} 个面"
+            # 将资源数据转换为适当的内容类型
+            if resource_type == "image":
+                # 如果是图像数据，返回图像内容
+                if "base64_data" in resource_data:
+                    return types.ReadResourceResult(
+                        content=[types.ImageContent(
+                            type="image",
+                            data=resource_data["base64_data"]
+                        )]
+                    )
             
-            elif resource_type == "scene":
-                # 为场景数据添加汇总信息
-                if "objects" in resource_data:
-                    object_types = {}
-                    for obj in resource_data["objects"]:
-                        obj_type = obj.get("type", "UNKNOWN")
-                        object_types[obj_type] = object_types.get(obj_type, 0) + 1
-                    
-                    summary = "场景包含: " + ", ".join([f"{count} 个 {obj_type}" for obj_type, count in object_types.items()])
-                    resource_data["summary"] = summary
+            # 默认情况下，返回JSON格式的资源数据
+            resource_text = json.dumps(resource_data, ensure_ascii=False, indent=2)
             
-            return types.TextContent(
-                type="text",
-                text=json.dumps(resource_data, indent=2)
+            logger.debug(f"资源 {uri} 读取成功")
+            return types.ReadResourceResult(
+                content=[types.TextContent(
+                    type="text",
+                    text=resource_text
+                )]
             )
-                
+            
         except Exception as e:
-            error_message = f"资源读取错误: {str(e)}"
-            print(error_message)
-            return types.TextContent(
-                type="text",
-                text=json.dumps({"error": error_message})
+            logger.error(f"读取资源时出错: {str(e)}")
+            return types.ReadResourceResult(
+                isError=True,
+                content=[types.TextContent(
+                    type="text",
+                    text=f"读取资源时出错: {str(e)}"
+                )]
             )
     
     @server.subscribe_resource()

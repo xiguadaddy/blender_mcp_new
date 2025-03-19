@@ -34,12 +34,15 @@ def set_material(args):
     
     def exec_func():
         try:
-            # 尝试获取对象
+            # 获取对象
             obj = bpy.data.objects.get(object_name)
             if not obj:
                 logger.error(f"找不到对象: {object_name}")
                 return {"error": f"找不到对象: {object_name}"}
                 
+            # 添加强制更新
+            bpy.context.view_layer.update()
+            
             # 确定材质名称 (如果未提供)
             mat_name = material_name or f"{object_name}_material"
             
@@ -159,6 +162,13 @@ def set_material(args):
                     slot.material = mat
                     logger.debug(f"填充空材质插槽: {mat.name}")
                 
+            # 修改后强制更新材质
+            if mat.node_tree:
+                mat.node_tree.update_tag()
+            
+            # 强制视图更新
+            bpy.context.view_layer.update()
+            
             return {
                 "status": "success", 
                 "material_name": mat.name,

@@ -11,7 +11,34 @@ bl_info = {
 import bpy
 from bpy.props import StringProperty, BoolProperty, EnumProperty
 from bpy.types import AddonPreferences
+from bpy.app.handlers import persistent
 import sys
+import logging
+from . import addon
+import os
+
+# 配置日志
+logger = logging.getLogger("BlenderMCP")
+
+# 用于标记插件是否已完全初始化
+_initialization_complete = False
+
+# 场景加载处理函数定义在全局作用域
+@persistent
+def load_handler(dummy):
+    """场景加载时初始化插件状态"""
+    from .handlers.resource_handlers import update_resource_state
+    update_resource_state()
+    
+    # 确保每个场景都有工具处理器
+    if hasattr(bpy.types, "_mcp_server_running") and bpy.types._mcp_server_running:
+        try:
+            from .handlers.tool_handlers import update_tools_handler
+            update_tools_handler()
+        except Exception as e:
+            logger.error(f"更新工具处理器时出错: {e}")
+    
+    logger.info("Blender MCP插件状态已初始化")
 
 # 插件首选项
 class BlenderMCPPreferences(AddonPreferences):
@@ -79,29 +106,99 @@ class BlenderMCPPreferences(AddonPreferences):
 def get_preferences():
     return bpy.context.preferences.addons[__name__].preferences
 
+# 延迟服务器启动，避免在注册过程中卡死
+def delayed_server_start():
+    """延迟启动IPC服务器，确保插件已完全注册"""
+    global _initialization_complete
+    
+    # 如果初始化已完成，则不需要再次启动
+    if _initialization_complete:
+        return None
+        
+    try:
+        # 安全导入，避免循环导入
+        from .ipc.server import start_ipc_server
+        
+        # 获取插件首选项
+        socket_path = None
+        debug_mode = False
+        
+        addon_id = __package__.split('.')[0]
+        try:
+            if addon_id in bpy.context.preferences.addons:
+                preferences = bpy.context.preferences.addons[addon_id].preferences
+                if preferences is not None:
+                    socket_path = preferences.socket_path
+                    debug_mode = preferences.debug_mode
+        except:
+            pass
+            
+        # 如果无法获取首选项，使用默认值
+        if not socket_path:
+            if sys.platform == "win32":
+                socket_path = "port:27015"
+            else:
+                import tempfile
+                socket_path = os.path.join(tempfile.gettempdir(), "blender-mcp.sock")
+            
+        # 启动IPC服务器
+        start_ipc_server(socket_path, debug_mode)
+        bpy.types._mcp_socket_path = socket_path
+        print(f"MCP服务器延迟启动成功: {socket_path}")
+        
+        _initialization_complete = True
+    except Exception as e:
+        print(f"延迟启动MCP服务器时出错: {str(e)}")
+        import traceback
+        traceback.print_exc()
+    
+    return None  # 确保函数只运行一次
+
 # 注册和注销函数
 def register():
-    bpy.utils.register_class(BlenderMCPPreferences)
+    # 先注册首选项类
+    try:
+        bpy.utils.register_class(BlenderMCPPreferences)
+        logger.info("首选项类注册成功")
+    except Exception as e:
+        logger.error(f"注册首选项类时出错: {str(e)}")
+        # 如果注册失败，这不应该阻止插件的其余部分注册
     
-    # 推迟导入，避免循环引用
-    from .addon import register_addon
-    register_addon()
+    # 再注册其他组件
+    addon.register()
     
-    # 如果设置为自动启动，启动IPC服务器
-    preferences = get_preferences()
-    if preferences.auto_start_server:
-        from .core import server_manager
-        server_manager.start_server(preferences.socket_path, preferences.debug_mode)
-
+    # 注册场景加载处理器
+    bpy.app.handlers.load_post.append(load_handler)
+    
+    # 不要自动启动服务器，避免可能的卡死
+    logger.info("MCP插件注册完成，请通过界面手动启动服务器")
+    
 def unregister():
     # 停止IPC服务器
-    if hasattr(bpy.types, "_mcp_server_running") and bpy.types._mcp_server_running:
-        from .core import server_manager
-        server_manager.stop_server()
+    try:
+        from .ipc.server import stop_ipc_server
+        stop_ipc_server()
+    except Exception as e:
+        logger.error(f"停止服务器时出错: {str(e)}")
     
-    from .addon import unregister_addon
-    unregister_addon()
-    bpy.utils.unregister_class(BlenderMCPPreferences)
+    # 移除场景加载处理器
+    if load_handler in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.remove(load_handler)
+    
+    # 注销其他组件
+    addon.unregister()
+    
+    # 最后注销首选项类
+    try:
+        bpy.utils.unregister_class(BlenderMCPPreferences)
+        logger.info("首选项类注销成功")
+    except Exception as e:
+        logger.error(f"注销首选项类时出错: {str(e)}")
+        # 如果注销失败，不应阻止插件的其余部分注销
+    
+    global _initialization_complete
+    _initialization_complete = False
+    print("MCP插件已卸载，服务器已停止")
 
 if __name__ == "__main__":
     register()

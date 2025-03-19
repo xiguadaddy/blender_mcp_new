@@ -6,10 +6,33 @@ import sys
 import os
 import threading
 import time
+import logging
+import tempfile
+
+# 设置日志
+logger = logging.getLogger("BlenderMCP.Operators")
+# 配置日志格式
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+# 添加控制台处理器
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(formatter)
+logger.addHandler(console_handler)
 
 # 全局变量
-_mcp_show_tools_list = True
 _mcp_server_running = False
+
+# 获取服务器运行状态
+def get_server_running_status():
+    """从bpy.types获取服务器运行状态，确保全局状态一致"""
+    return hasattr(bpy.types, "_mcp_server_running") and bpy.types._mcp_server_running
+
+# 设置服务器运行状态
+def set_server_running_status(status):
+    """设置服务器运行状态，并确保全局状态一致"""
+    global _mcp_server_running
+    _mcp_server_running = status
+    bpy.types._mcp_server_running = status
+    logger.debug(f"更新服务器状态: {status}")
 
 # 启动MCP服务器操作符
 class MCP_OT_StartServer(Operator):
@@ -18,91 +41,117 @@ class MCP_OT_StartServer(Operator):
     bl_description = "启动MCP协议服务器"
     
     def execute(self, context):
-        global _mcp_server_running
-        
         try:
-            preferences = context.preferences.addons["blender-addon"].preferences
-            server_path = preferences.server_path
+            # 获取插件首选项
+            import bpy.types
             
-            if not server_path or not os.path.exists(server_path):
-                self.report({'ERROR'}, "服务器路径不存在，请在插件首选项中设置")
+            # 获取插件ID
+            addon_id = __package__.split('.')[0]  # 提取插件的主包名
+            
+            socket_path = None
+            debug_mode = False
+            
+            # 检查插件是否注册并获取首选项
+            if addon_id in context.preferences.addons:
+                preferences = context.preferences.addons[addon_id].preferences
+                if preferences is not None:
+                    socket_path = preferences.socket_path
+                    debug_mode = preferences.debug_mode
+                    logger.debug(f"从首选项获取配置: {socket_path}, 调试模式: {debug_mode}")
+                else:
+                    logger.warning(f"插件 {addon_id} 的首选项对象为None")
+            else:
+                logger.warning(f"插件 {addon_id} 未在context.preferences.addons中找到")
+                
+            # 如果无法获取socket_path，使用默认值
+            if not socket_path:
+                if sys.platform == "win32":
+                    socket_path = "port:27015"
+                else:
+                    socket_path = os.path.join(tempfile.gettempdir(), "blender-mcp.sock")
+                logger.info(f"使用默认socket路径: {socket_path}")
+            
+            # 启动IPC服务器但避免直接导入UI模块
+            from ..core import server_manager
+            
+            # 直接启动服务器，不使用状态检测
+            self.report({'INFO'}, "正在启动MCP服务器...")
+            success = server_manager.start_server(socket_path, debug_mode)
+            
+            if not success:
+                self.report({'ERROR'}, "启动服务器失败，详情请查看控制台日志")
                 return {'CANCELLED'}
             
-            # 使用启动脚本启动服务器
-            start_script = os.path.join(server_path, "start_server.py")
+            # 设置状态但不触发UI更新
+            set_server_running_status(True)
             
-            if not os.path.exists(start_script):
-                self.report({'ERROR'}, f"启动脚本不存在: {start_script}")
-                return {'CANCELLED'}
-            
-            cmd = [sys.executable, start_script]
-            
-            # 使用子进程启动服务器
-            import subprocess
-            subprocess.Popen(cmd, 
-                            cwd=server_path,
-                            stdout=subprocess.PIPE, 
-                            stderr=subprocess.PIPE,
-                            shell=False)
-            
-            self.report({'INFO'}, "MCP服务器启动中...")
-            _mcp_server_running = True
-            
-            # 延迟导入避免循环引用
-            from .ui import MCP_PT_Panel
-            MCP_PT_Panel.update()
-            
-            # 等待服务器启动
-            time.sleep(2)
-            
-            # 尝试连接
-            host = preferences.server_host
-            port = preferences.server_port
+            # 简单地强制重绘所有区域，避免直接导入UI模块
+            for window in context.window_manager.windows:
+                for area in window.screen.areas:
+                    area.tag_redraw()
             
             # 设置MCPClient
-            context.scene.mcp_client = {"host": host, "port": port}
+            if "port:" in socket_path:
+                # 从socket_path中提取端口
+                port = int(socket_path.split(":", 1)[1])
+                host = "127.0.0.1"
+            else:
+                # 使用默认配置
+                port = 27015
+                host = "127.0.0.1"
+                
+            # 设置客户端连接信息
+            context.scene.mcp_client.host = host
+            context.scene.mcp_client.port = port
             
-            # 创建并添加handler
-            bpy.app.timers.register(self.check_server_status, first_interval=1.0)
+            # 使用简单的状态检测，避免定时器嵌套
+            if not bpy.app.timers.is_registered(self.simple_status_check):
+                bpy.app.timers.register(self.simple_status_check, first_interval=1.0)
             
+            self.report({'INFO'}, "MCP服务器已启动")
             return {'FINISHED'}
             
         except Exception as e:
-            _mcp_server_running = False
+            set_server_running_status(False)
             self.report({'ERROR'}, f"启动服务器时出错: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return {'CANCELLED'}
             
-    def check_server_status(self):
-        # 检查服务器状态的定时器函数
-        global _mcp_server_running
-        prev_status = _mcp_server_running
-        
+    def simple_status_check(self):
+        """简化的状态检查函数，避免UI模块循环导入"""
         try:
-            # 尝试连接服务器
-            context = bpy.context
-            if hasattr(context.scene, "mcp_client"):
-                client_info = context.scene.mcp_client
-                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                s.settimeout(1)
+            # 检查服务器状态，但不更新UI
+            if not hasattr(bpy.context.scene, "mcp_client"):
+                return None  # 停止定时器
+                
+            client_info = bpy.context.scene.mcp_client
+            if hasattr(client_info, "host") and hasattr(client_info, "port"):
                 try:
-                    s.connect((client_info["host"], client_info["port"]))
+                    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    s.settimeout(0.5)
+                    s.connect((client_info.host, client_info.port))
                     s.close()
-                    _mcp_server_running = True
+                    # 服务器正在运行，更新状态但不更新UI
+                    set_server_running_status(True)
+                    # 强制重绘所有区域
+                    for window in bpy.context.window_manager.windows:
+                        for area in window.screen.areas:
+                            area.tag_redraw()
+                    return 5.0  # 继续检查，但降低频率
                 except:
-                    _mcp_server_running = False
-                    
-                # 如果状态变化，刷新UI
-                if prev_status != _mcp_server_running:
-                    from .ui import MCP_PT_Panel
-                    MCP_PT_Panel.update()
-                    
-                if not _mcp_server_running:
-                    return 5.0  # 继续检查
-                return None  # 连接成功后停止定时器
+                    # 连接失败，服务器可能已停止
+                    set_server_running_status(False)
+                    # 强制重绘所有区域
+                    for window in bpy.context.window_manager.windows:
+                        for area in window.screen.areas:
+                            area.tag_redraw()
+                    return None  # 停止定时器
         except:
-            pass
-        
-        return 5.0  # 5秒后再次检查
+            # 出现任何异常都停止定时器
+            return None
+            
+        return 5.0  # 继续检查，但降低频率
 
 # 停止MCP服务器操作符
 class MCP_OT_StopServer(Operator):
@@ -111,33 +160,33 @@ class MCP_OT_StopServer(Operator):
     bl_description = "停止运行中的MCP协议服务器"
     
     def execute(self, context):
-        global _mcp_server_running
-        
         try:
             # 通知用户
-            self.report({'INFO'}, "已发送停止命令到MCP服务器")
+            self.report({'INFO'}, "正在停止MCP服务器...")
             
-            # 发送停止请求
-            if hasattr(context.scene, "mcp_client"):
-                client_info = context.scene.mcp_client
-                try:
-                    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    s.settimeout(1)
-                    s.connect((client_info["host"], client_info["port"]))
-                    s.sendall(b'{"command":"stop"}\n')
-                    s.close()
-                except:
-                    pass
+            # 使用server_manager停止服务器
+            from ..core import server_manager
+            success = server_manager.stop_server()
             
-            _mcp_server_running = False
+            if not success:
+                self.report({'ERROR'}, "停止服务器失败")
+                return {'CANCELLED'}
             
-            # 更新UI
-            from .ui import MCP_PT_Panel
-            MCP_PT_Panel.update()
+            # 清理状态
+            set_server_running_status(False)
             
+            # 简单地标记需要重绘
+            for window in context.window_manager.windows:
+                for area in window.screen.areas:
+                    area.tag_redraw()
+            
+            self.report({'INFO'}, "MCP服务器已停止")
             return {'FINISHED'}
         except Exception as e:
             self.report({'ERROR'}, f"停止服务器时出错: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            set_server_running_status(False)  # 确保状态一致
             return {'CANCELLED'}
 
 # 创建测试对象
@@ -146,59 +195,162 @@ class MCP_OT_CreateTestObject(bpy.types.Operator):
     bl_label = "创建测试对象"
     bl_description = "创建一个测试对象来验证MCP连接"
     
-    def execute(self, context):
-        try:
-            print("开始创建测试对象...")
-            
-            if not hasattr(context.scene, "mcp_tools_handler") or not context.scene.mcp_tools_handler:
-                error_msg = "MCP工具处理器不可用，请确保服务器已连接"
-                print(f"错误: {error_msg}")
-                self.report({'ERROR'}, error_msg)
-                return {'CANCELLED'}
-            
-            # 执行创建对象工具
-            print("发送创建对象请求...")
-            result = context.scene.mcp_tools_handler.execute_tool(
-                "create_object", 
-                {
-                    "object_type": "cube", 
-                    "size": 2.0, 
-                    "name": "MCP_Test_Cube",
-                    "location": [0, 0, 0]
-                }
-            )
-            
-            print(f"创建对象结果: {result}")
-            if "error" in result:
-                error_msg = f"创建测试对象失败: {result['error']}"
-                print(f"错误: {error_msg}")
-                self.report({'ERROR'}, error_msg)
-                return {'CANCELLED'}
+    # 添加启用状态属性
+    enabled: bpy.props.BoolProperty(default=True)
+    
+    # 添加定时器标识
+    _timer = None
+    _is_running = False
+    _result = None
+    _stage = "start"  # 执行阶段：start -> create_object -> set_material -> finish
+    
+    @classmethod
+    def poll(cls, context):
+        from ..addon.ui import get_server_running_status, get_tools_handler_status
+        return get_server_running_status() and get_tools_handler_status()
+    
+    def modal(self, context, event):
+        """模态执行函数，处理异步操作"""
+        if event.type == 'TIMER':
+            if self._stage == "start" and not self._is_running:
+                # 开始异步执行创建对象
+                self._is_running = True
+                self.execute_async_task("create_object")
+                return {'RUNNING_MODAL'}
                 
-            # 设置材质
-            print("发送设置材质请求...")
-            material_result = context.scene.mcp_tools_handler.execute_tool(
-                "set_material", 
-                {
-                    "object_name": result["object_name"],
-                    "color": [1.0, 0.2, 0.2, 1.0],
-                    "metallic": 0.2,
-                    "roughness": 0.5
-                }
-            )
-            print(f"设置材质结果: {material_result}")
+            elif self._stage == "create_object" and self._result is not None:
+                # 创建对象完成，检查结果
+                result = self._result
+                self._result = None
+                
+                if "error" in result:
+                    error_msg = f"创建测试对象失败: {result['error']}"
+                    print(f"错误: {error_msg}")
+                    self.report({'ERROR'}, error_msg)
+                    self.cleanup()
+                    return {'CANCELLED'}
+                
+                # 保存对象名称用于设置材质
+                self._object_name = result["object_name"]
+                print(f"创建对象成功: {self._object_name}")
+                
+                # 进入下一阶段：设置材质
+                self._stage = "set_material"
+                self._is_running = False
+                return {'RUNNING_MODAL'}
+                
+            elif self._stage == "set_material" and not self._is_running:
+                # 开始异步执行设置材质
+                self._is_running = True
+                self.execute_async_task("set_material")
+                return {'RUNNING_MODAL'}
+                
+            elif self._stage == "set_material" and self._result is not None:
+                # 设置材质完成，结束操作
+                material_result = self._result
+                self._result = None
+                
+                if "error" in material_result:
+                    print(f"设置材质警告: {material_result['error']}")
+                    # 材质设置失败不影响整体结果，仍然返回成功
+                
+                success_msg = f"创建了测试对象: {self._object_name}"
+                print(f"成功: {success_msg}")
+                self.report({'INFO'}, success_msg)
+                
+                # 结束定时器和模态操作
+                self.cleanup()
+                return {'FINISHED'}
+                
+        # 用户取消操作
+        elif event.type in {'RIGHTMOUSE', 'ESC'}:
+            self.cleanup()
+            self.report({'INFO'}, "操作已取消")
+            return {'CANCELLED'}
             
-            success_msg = f"创建了测试对象: {result['object_name']}"
-            print(f"成功: {success_msg}")
-            self.report({'INFO'}, success_msg)
-            return {'FINISHED'}
+        return {'RUNNING_MODAL'}
+        
+    def execute_async_task(self, task_type):
+        """在后台线程中异步执行任务"""
+        import threading
+        
+        def run_task():
+            try:
+                if task_type == "create_object":
+                    print("异步发送创建对象请求...")
+                    result = bpy.context.scene.mcp_tools_handler.execute_tool(
+                        "create_object", 
+                        {
+                            "object_type": "cube", 
+                            "size": 2.0, 
+                            "name": "MCP_Test_Cube",
+                            "location": [0, 0, 0]
+                        }
+                    )
+                    self._result = result
+                    self._stage = "create_object"  # 更新阶段
+                    
+                elif task_type == "set_material":
+                    print("异步发送设置材质请求...")
+                    result = bpy.context.scene.mcp_tools_handler.execute_tool(
+                        "set_material", 
+                        {
+                            "object_name": self._object_name,
+                            "color": [1.0, 0.2, 0.2, 1.0],
+                            "metallic": 0.2,
+                            "roughness": 0.5
+                        }
+                    )
+                    self._result = result
+                    self._stage = "set_material"  # 更新阶段
+                    
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                self._result = {"error": str(e)}
+                
+        # 创建并启动线程
+        thread = threading.Thread(target=run_task)
+        thread.daemon = True
+        thread.start()
+    
+    def execute(self, context):
+        """启动模态操作"""
+        try:
+            print("开始创建测试对象（异步模式）...")
+            
+            # 检查服务器是否运行
+            if not get_server_running_status():
+                self.report({'ERROR'}, "MCP服务器未运行，请先启动服务器")
+                return {'CANCELLED'}
+            
+            # 检查工具处理器
+            if not hasattr(context.scene, "mcp_tools_handler") or not context.scene.mcp_tools_handler:
+                error_msg = "工具处理器不可用，请手动停止并重新启动服务器"
+                print(f"错误: {error_msg}")
+                self.report({'ERROR'}, error_msg)
+                return {'CANCELLED'}
+            
+            # 启动模态定时器
+            self._timer = context.window_manager.event_timer_add(0.1, window=context.window)
+            context.window_manager.modal_handler_add(self)
+            return {'RUNNING_MODAL'}
+            
         except Exception as e:
             import traceback
             traceback.print_exc()
-            error_msg = f"创建测试对象时出错: {str(e)}"
+            error_msg = f"启动创建测试对象时出错: {str(e)}"
             print(f"异常: {error_msg}")
             self.report({'ERROR'}, error_msg)
             return {'CANCELLED'}
+            
+    def cleanup(self):
+        """清理定时器和状态"""
+        if self._timer:
+            bpy.context.window_manager.event_timer_remove(self._timer)
+            self._timer = None
+        self._is_running = False
+        self._result = None
 
 # 查看MCP资源操作符
 class MCP_OT_ViewResources(Operator):
@@ -261,15 +413,23 @@ class MCP_OT_CheckServer(Operator):
         finally:
             client_socket.close()
 
-# 切换工具列表显示的操作符
-class MCP_OT_ToggleToolsList(bpy.types.Operator):
+# 切换工具列表显示操作符
+class MCP_OT_ToggleToolsList(Operator):
     bl_idname = "mcp.toggle_tools_list"
     bl_label = "显示/隐藏工具列表"
     bl_description = "切换工具列表的显示状态"
     
     def execute(self, context):
-        global _mcp_show_tools_list
-        _mcp_show_tools_list = not _mcp_show_tools_list
+        # 直接从ui模块获取变量
+        from . import ui
+        ui._mcp_show_tools_list = not ui._mcp_show_tools_list
+        logger.debug(f"切换工具列表显示: {ui._mcp_show_tools_list}")
+            
+        # 强制更新UI
+        for window in bpy.context.window_manager.windows:
+            for area in window.screen.areas:
+                area.tag_redraw()
+                
         return {'FINISHED'}
 
 # 执行工具
@@ -400,6 +560,8 @@ def register_operators():
         MCP_OT_ToggleToolsList,
         MCP_OT_ExecuteTool,
         MCP_OT_ToolInfo,
+        MCP_OT_ViewResources,
+        MCP_OT_CheckServer,
     ]
     
     for cls in classes:
@@ -414,6 +576,8 @@ def unregister_operators():
         MCP_OT_ToggleToolsList,
         MCP_OT_ExecuteTool,
         MCP_OT_ToolInfo,
+        MCP_OT_ViewResources,
+        MCP_OT_CheckServer,
     ]
     
     for cls in reversed(classes):

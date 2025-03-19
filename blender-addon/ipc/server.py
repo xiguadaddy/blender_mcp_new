@@ -11,6 +11,18 @@ from ..handlers import resource_handlers, tool_handlers
 
 # 设置日志
 logger = logging.getLogger("BlenderMCP.IPC")
+# 配置日志格式
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+# 添加控制台处理器
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(formatter)
+logger.addHandler(console_handler)
+
+# 添加文件处理器
+log_file = os.path.join(tempfile.gettempdir(), "blender_mcp_ipc.log")
+file_handler = logging.FileHandler(log_file, mode='a')
+file_handler.setFormatter(formatter)
+logger.addHandler(file_handler)
 
 # 全局IPC服务器实例
 _ipc_server = None
@@ -48,6 +60,13 @@ class IPCServer(threading.Thread):
             logger.setLevel(logging.DEBUG)
         else:
             logger.setLevel(logging.INFO)
+        
+        logger.info(f"IPC服务器初始化完成，{'使用调试模式' if debug_mode else '使用普通模式'}")
+        logger.debug(f"平台: {'Windows' if self.is_windows else 'Unix/Linux/MacOS'}")
+        if self.is_windows:
+            logger.debug(f"使用TCP套接字: {self.host}:{self.port}")
+        else:
+            logger.debug(f"使用Unix域套接字: {self.socket_path}")
         
     def run(self):
         """启动服务器并处理连接"""
@@ -285,8 +304,10 @@ class IPCServer(threading.Thread):
                     # 添加客户端引用到请求中，用于资源订阅
                     request["_client"] = client_socket
                     
-                    # 处理请求
+                    # 添加更多详细日志
+                    logger.debug(f"收到IPC请求: {request}")
                     response = self.handle_request(request)
+                    logger.debug(f"发送IPC响应: {response.get('status', 'unknown')} ({len(str(response))} 字节)")
                     
                     # 发送响应
                     response_json = json.dumps(response)
@@ -327,151 +348,181 @@ class IPCServer(threading.Thread):
     def handle_request(self, request):
         """处理请求并返回结果"""
         action = request.get("action")
-        logger.debug(f"处理动作: {action}")
+        method = request.get("method")
+        logger.debug(f"处理请求: action={action}, method={method}")
         
         try:
+            # 处理MCP方法请求
+            if method == "mcp/listTools":
+                logger.info("收到MCP/listTools请求")
+                tools = tool_handlers.list_tools()
+                logger.debug(f"返回工具列表，共{len(tools)}个工具")
+                return {"result": {"tools": tools}}
+            elif method == "mcp/listResources":
+                logger.info("收到MCP/listResources请求")
+                try:
+                    # 添加超时保护，最多等待3秒
+                    import time
+                    import threading
+                    
+                    result = {"resources": []}
+                    completed = threading.Event()
+                    
+                    def fetch_resources():
+                        try:
+                            resources = resource_handlers.handle_list_resources()
+                            result["resources"] = resources
+                            completed.set()
+                        except Exception as e:
+                            logger.error(f"获取资源列表时出错: {e}")
+                            completed.set()
+                    
+                    # 在后台线程中获取资源
+                    thread = threading.Thread(target=fetch_resources)
+                    thread.daemon = True
+                    thread.start()
+                    
+                    # 等待结果，最多3秒
+                    if completed.wait(3.0):
+                        logger.debug(f"返回资源列表，共{len(result['resources'])}个资源")
+                    else:
+                        logger.warning("获取资源列表超时，返回空列表")
+                        
+                    return {"result": result}
+                except Exception as e:
+                    logger.error(f"处理listResources请求时出错: {e}")
+                    import traceback
+                    logger.error(traceback.format_exc())
+                    return {"result": {"resources": []}}
+                
             # 资源相关操作
             if action == "list_resources":
-                return resource_handlers.handle_list_resources()
+                logger.debug("处理list_resources请求")
+                resources = resource_handlers.handle_list_resources()
+                logger.debug(f"找到{len(resources)}个资源")
+                return resources
             elif action == "list_tools":
-                # 硬编码工具列表作为临时解决方案
-                # 这样无需重新启动Blender即可响应list_tools请求
-                return [
-                    {
-                        "name": "create_object",
-                        "description": "在Blender中创建一个对象",
-                        "version": "1.0",
-                        "input_schema": {
-                            "type": "object",
-                            "properties": {
-                                "object_type": {
-                                    "type": "string", 
-                                    "enum": ["cube", "sphere", "cylinder", "plane", "cone", "torus"],
-                                    "description": "要创建的对象类型"
-                                },
-                                "name": {
-                                    "type": "string",
-                                    "description": "对象名称(可选)"
-                                },
-                                "location": {
-                                    "type": "array",
-                                    "items": {"type": "number"},
-                                    "description": "对象位置坐标 [x, y, z]"
-                                },
-                                "size": {
-                                    "type": "number",
-                                    "description": "对象大小"
-                                }
-                            },
-                            "required": ["object_type"]
-                        }
-                    },
-                    {
-                        "name": "set_material",
-                        "description": "为对象设置材质",
-                        "version": "1.0",
-                        "input_schema": {
-                            "type": "object",
-                            "properties": {
-                                "object_name": {
-                                    "type": "string",
-                                    "description": "目标对象名称"
-                                },
-                                "material_name": {
-                                    "type": "string",
-                                    "description": "材质名称（如果不提供则自动生成）"
-                                },
-                                "color": {
-                                    "type": "array",
-                                    "items": {"type": "number"},
-                                    "description": "RGBA颜色值 [r, g, b, a]，或RGB颜色值 [r, g, b]"
-                                },
-                                "metallic": {
-                                    "type": "number",
-                                    "description": "金属度(0-1)"
-                                },
-                                "roughness": {
-                                    "type": "number",
-                                    "description": "粗糙度(0-1)"
-                                }
-                            },
-                            "required": ["object_name"]
-                        }
-                    },
-                    {
-                        "name": "add_light",
-                        "description": "添加灯光到场景",
-                        "version": "1.0",
-                        "input_schema": {
-                            "type": "object",
-                            "properties": {
-                                "light_type": {
-                                    "type": "string",
-                                    "enum": ["POINT", "SUN", "SPOT", "AREA"],
-                                    "description": "灯光类型"
-                                },
-                                "name": {
-                                    "type": "string",
-                                    "description": "灯光名称(可选)"
-                                },
-                                "location": {
-                                    "type": "array",
-                                    "items": {"type": "number"},
-                                    "description": "灯光位置 [x, y, z]"
-                                },
-                                "color": {
-                                    "type": "array",
-                                    "items": {"type": "number"},
-                                    "description": "RGB颜色值 [r, g, b]"
-                                },
-                                "energy": {
-                                    "type": "number",
-                                    "description": "灯光强度"
-                                }
-                            },
-                            "required": ["light_type"]
-                        }
-                    }
-                ]
+                logger.debug("处理list_tools请求")
+                tools = tool_handlers.list_tools()
+                logger.info(f"返回{len(tools)}个工具")
+                return tools
             elif action == "read_resource":
-                return resource_handlers.handle_read_resource(
-                    request.get("type"),
-                    request.get("id")
-                )
-            elif action == "check_object_exists":
-                return resource_handlers.check_object_exists(
-                    request.get("object_name")
-                )
-            elif action == "subscribe_resource":
-                # 处理资源订阅请求
-                uri = request.get("uri")
-                client = request.get("_client")  # 由handle_client函数添加的客户端引用
-                
-                if uri and client:
-                    if uri not in self.subscribed_resources:
-                        self.subscribed_resources[uri] = []
-                    if client not in self.subscribed_resources[uri]:
-                        self.subscribed_resources[uri].append(client)
-                    return {"status": "subscribed", "uri": uri}
-                else:
-                    return {"error": "无效的订阅请求"}
+                resource_type = request.get("type")
+                resource_id = request.get("id")
+                logger.debug(f"处理read_resource请求: type={resource_type}, id={resource_id}")
+                return resource_handlers.handle_read_resource(resource_type, resource_id)
                 
             # 工具相关操作
             elif action == "call_tool":
-                return tool_handlers.execute_tool(
-                    request.get("tool"),
-                    request.get("arguments", {})
-                )
+                tool_name = request.get("tool")
+                arguments = request.get("arguments", {})
+                logger.info(f"执行工具: {tool_name}, 参数: {json.dumps(arguments)}")
                 
-            # 未知操作
+                # 添加超时保护，最多等待10秒
+                try:
+                    import threading
+                    import time
+                    
+                    tool_result = {"error": "工具执行超时"}
+                    execution_complete = threading.Event()
+                    
+                    def execute_tool_with_timeout():
+                        nonlocal tool_result
+                        try:
+                            result = tool_handlers.execute_tool(tool_name, arguments)
+                            tool_result = result
+                            execution_complete.set()
+                        except Exception as e:
+                            logger.error(f"执行工具时出错: {e}")
+                            tool_result = {"error": str(e)}
+                            execution_complete.set()
+                    
+                    # 在后台线程中执行工具
+                    thread = threading.Thread(target=execute_tool_with_timeout)
+                    thread.daemon = True
+                    thread.start()
+                    
+                    # 等待最多10秒
+                    if execution_complete.wait(10.0):
+                        logger.debug(f"工具执行完成: {json.dumps(tool_result)}")
+                    else:
+                        logger.warning(f"工具 {tool_name} 执行超时")
+                        tool_result = {"error": f"工具 {tool_name} 执行超时 (>10秒)"}
+                    
+                    return tool_result
+                except Exception as e:
+                    logger.error(f"添加工具超时保护时出错: {e}")
+                    # 如果超时机制本身出错，回退到直接执行
+                    result = tool_handlers.execute_tool(tool_name, arguments)
+                    logger.debug(f"工具执行结果: {json.dumps(result)}")
+                    return result
+                
+            # 订阅资源变化
+            elif action == "subscribe_resource":
+                resource_uri = request.get("uri")
+                client_socket = request.get("_client_socket")
+                
+                logger.debug(f"处理资源订阅请求: {resource_uri}")
+                
+                if not resource_uri or not client_socket:
+                    return {"error": "缺少必要参数"}
+                    
+                if resource_uri not in self.subscribed_resources:
+                    self.subscribed_resources[resource_uri] = []
+                    
+                if client_socket not in self.subscribed_resources[resource_uri]:
+                    self.subscribed_resources[resource_uri].append(client_socket)
+                    
+                logger.debug(f"客户端已订阅资源 {resource_uri}")
+                return {"status": "success", "message": f"已订阅资源 {resource_uri}"}
+                
+            # 取消订阅资源变化
+            elif action == "unsubscribe_resource":
+                resource_uri = request.get("uri")
+                client_socket = request.get("_client_socket")
+                
+                logger.debug(f"处理资源取消订阅请求: {resource_uri}")
+                
+                if not resource_uri or not client_socket:
+                    return {"error": "缺少必要参数"}
+                    
+                if resource_uri in self.subscribed_resources and client_socket in self.subscribed_resources[resource_uri]:
+                    self.subscribed_resources[resource_uri].remove(client_socket)
+                    logger.debug(f"客户端已取消订阅资源 {resource_uri}")
+                    
+                return {"status": "success", "message": f"已取消订阅资源 {resource_uri}"}
+            
+            # 测试命令
+            elif action == "test":
+                logger.debug("处理测试请求")
+                return {"status": "success", "server_time": time.time()}
+                
+            # 停止服务器
+            elif action == "stop" or request.get("command") == "stop":
+                logger.info("收到停止服务器请求")
+                self.running = False
+                return {"status": "shutting_down"}
+                
+            # 获取服务器状态
+            elif action == "status":
+                logger.debug("处理状态请求")
+                return {
+                    "status": "running",
+                    "uptime": time.time() - self.start_time if hasattr(self, 'start_time') else 0,
+                    "clients_count": len(self.clients),
+                    "subscriptions_count": sum(len(clients) for clients in self.subscribed_resources.values())
+                }
+                
             else:
-                error_msg = f"未知操作: {action}"
-                logger.error(error_msg)
+                error_msg = f"未知操作: {action or method}"
+                logger.warning(error_msg)
                 return {"error": error_msg}
                 
         except Exception as e:
+            import traceback
             error_msg = f"处理请求时出错: {str(e)}"
             logger.error(error_msg)
+            logger.error(traceback.format_exc())
             return {"error": error_msg}
         
     def stop(self):
@@ -497,28 +548,80 @@ class IPCServer(threading.Thread):
             
         logger.info("IPC服务器已停止")
 
+    def is_running(self):
+        """检查服务器是否正在运行"""
+        return self.running and self.is_alive()
+
 def start_ipc_server(socket_path=None, debug_mode=False):
     """启动IPC服务器"""
     global _ipc_server
     
-    # 如果未提供socket_path，则根据平台生成一个默认值
-    if socket_path is None:
-        if sys.platform == "win32":
-            socket_path = "port:27015"  # Windows使用TCP端口
-        else:
-            socket_path = os.path.join(tempfile.gettempdir(), "blender-mcp.sock")
-    
-    if _ipc_server is None:
-        logger.info(f"启动IPC服务器，通信路径: {socket_path}")
+    try:
+        if _ipc_server is not None:
+            logger.warning("IPC服务器已经在运行")
+            return True  # 已经运行也视为成功
+            
+        logger.info("正在启动IPC服务器...")
+        
+        # 如果没有提供socket_path，则使用默认值
+        if socket_path is None:
+            if sys.platform == "win32":
+                socket_path = "port:27015"
+            else:
+                socket_path = os.path.join(tempfile.gettempdir(), "blender-mcp.sock")
+                
+        logger.info(f"使用socket路径: {socket_path}")
+        
+        # 快速创建和启动服务器，避免复杂的等待逻辑
         _ipc_server = IPCServer(socket_path, debug_mode)
         _ipc_server.start()
         
-        # 存储socket_path用于客户端连接
-        bpy.types._mcp_socket_path = socket_path
+        # 给服务器一点时间启动，但不等待太久
+        time.sleep(0.1)
+        
+        # 快速检查服务器是否启动
+        if not _ipc_server.is_alive():
+            logger.error("IPC服务器启动失败")
+            _ipc_server = None
+            return False
+            
+        logger.info("IPC服务器已启动")
+        
+        # 确保主线程处理器已注册
+        try:
+            from ..utils import thread_utils
+            thread_utils.register_main_thread_processor()
+        except Exception as e:
+            logger.error(f"注册主线程处理器失败: {e}")
+            # 但不要因为这个失败就停止服务器
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"启动IPC服务器出错: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        
+        # 清理资源
+        if _ipc_server is not None:
+            try:
+                _ipc_server.stop()
+            except:
+                pass
+            _ipc_server = None
+            
+        return False
 
 def stop_ipc_server():
     """停止IPC服务器"""
     global _ipc_server
+    
     if _ipc_server is not None:
+        logger.info("正在停止IPC服务器...")
         _ipc_server.stop()
         _ipc_server = None
+        logger.info("IPC服务器已停止")
+        return True
+    else:
+        logger.warning("没有正在运行的IPC服务器")
+        return False
