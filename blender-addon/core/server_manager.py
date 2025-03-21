@@ -57,12 +57,48 @@ def start_server(socket_path, debug_mode=False):
         
         def register_tools_handler_with_timeout():
             try:
+                # 首先尝试加载和初始化工具模块
+                import importlib
+                logger.info("开始初始化和加载工具模块...")
+                
+                # 导入工具系统
+                from ..handlers import tools
+                importlib.reload(tools)
+                
+                # 手动导入所有工具包以确保它们被加载
+                from ..handlers.tools import object_tools, material_tools, lighting_tools
+                from ..handlers.tools import camera_tools, scene_tools, mesh_tools
+                from ..handlers.tools import effect_tools, animation_tools, modeling_tools
+                
+                # 使用工具注册表
+                from ..handlers.tools.registry import get_tool_registry
+                registry = get_tool_registry()
+                
+                # 检查工具注册状态
+                tool_count = len(registry._tools) if hasattr(registry, '_tools') else 0
+                logger.info(f"工具注册表初始化完成，已注册 {tool_count} 个工具")
+                
+                # 现在注册工具处理器
                 from ..handlers.tool_handlers import register_tools_handler
                 result = register_tools_handler()
                 registration_success[0] = result
+                
+                logger.info(f"工具处理器注册{'成功' if result else '失败'}")
+                
+                # 再次检查工具注册状态
+                tool_count = len(registry._tools) if hasattr(registry, '_tools') else 0
+                logger.info(f"处理器注册后，已有 {tool_count} 个已注册工具")
+                
+                if tool_count > 0:
+                    # 输出已注册工具列表
+                    tool_names = list(registry._tools.keys())
+                    logger.info(f"已注册工具示例: {tool_names[:5]}...")
+                
                 registration_complete.set()
             except Exception as e:
                 logger.error(f"在线程中注册工具处理器时出错: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
                 registration_complete.set()
         
         # 在后台线程中执行注册

@@ -310,141 +310,75 @@ def register_tool_handlers(server, ipc_client):
     
     @server.call_tool()
     async def handle_call_tool(tool_name: str, tool_args: Dict[str, Any]) -> types.CallToolResult:
-        """处理工具调用请求"""
-        logger.debug(f"调用工具: {tool_name}，参数: {tool_args}")
+        """
+        处理工具调用请求
+        
+        Args:
+            tool_name: 工具名称
+            tool_args: 工具参数
+            
+        Returns:
+            工具调用结果
+        """
+        print(f"处理工具调用: {tool_name}, {tool_args}")
+        logger.debug(f"调用工具: {tool_name}, 参数: {tool_args}")
         
         try:
-            # 使用 "action"/"tool" 格式调用Blender中的工具
-            logger.info(f"发送工具请求到Blender: {tool_name}")
-            result = await ipc_client.send_request_with_retry({
-                "action": "call_tool",
-                "tool": tool_name,
-                "arguments": tool_args
-            })
+            # 调用Blender中的工具
+            logger.info(f"发送MCP工具请求到Blender: {tool_name}")
             
-            # 记录完整的结果
-            logger.debug(f"从Blender收到的原始响应: {result}")
+            # 构建请求
+            blender_request = {
+                "jsonrpc": "2.0",
+                "id": f"tool_call_{int(time.time() * 1000000)}",
+                "method": "tools/call",
+                "params": {
+                    "name": tool_name,
+                    "arguments": tool_args or {}
+                },
+                "arguments": {}  # 兼容旧格式
+            }
             
-            # 检查是否有错误
-            if isinstance(result, dict) and "error" in result:
-                error_msg = str(result["error"])
-                logger.error(f"调用工具出错: {error_msg}")
-                
-                # 创建错误内容 - 先创建文本内容对象
-                text_content = types.TextContent(
-                    type="text",
-                    text=f"工具 {tool_name} 执行失败: {error_msg}"
-                )
-                
-                # 创建MCP标准错误数据
-                error_data = types.ErrorData(
-                    code=types.INTERNAL_ERROR,  # 使用标准JSON-RPC错误码
-                    message=f"工具 {tool_name} 执行失败",
-                    data=error_msg
-                )
-                
-                # 使用错误数据构建CallToolResult - 确保内容列表只包含正确类型的对象
-                content_list = [text_content]  # 先创建内容列表
-                
-                # 创建并返回CallToolResult实例，使用具名参数
-                return types.CallToolResult(
-                    content=content_list,  # 传递内容列表
-                    isError=True,
-                    error=error_data
-                )
+            # 发送请求
+            logger.debug(f"发送请求: {blender_request}")
+            response = await ipc_client.send_request(blender_request)
+            logger.debug(f"原始响应类型: {type(response)}")
+            logger.debug(f"原始响应数据: {json.dumps(response, ensure_ascii=False)}")
             
-            # 处理成功响应
-            logger.info(f"工具 {tool_name} 调用成功")
+            # 从响应中提取result
+            result = response.get("result", {})
+            content = result.get("content", [])
             
-            # 创建成功消息
-            success_msg = f"工具 {tool_name} 已成功执行"
+            # 检查content格式
+            logger.debug(f"响应content类型: {type(content)}")
+            if content and len(content) > 0:
+                logger.debug(f"响应content[0]类型: {type(content[0])}")
+                logger.debug(f"响应content[0]数据: {json.dumps(content[0], ensure_ascii=False)}")
             
-            # 如果响应包含对象名称，添加到消息中
-            if isinstance(result, dict) and "object_name" in result:
-                success_msg += f"，创建了对象: {result['object_name']}"
+            # 确保结果是标准格式
+            return_obj = {
+                "content": content,
+                "isError": result.get("isError", False)
+            }
             
-            # 创建内容 - 先创建文本内容对象
-            text_content = types.TextContent(
-                type="text",
-                text=success_msg
-            )
+            logger.debug(f"返回对象类型: {type(return_obj)}")
+            logger.debug(f"返回对象是否包含content字段: {return_obj.get('content') is not None}")
+            logger.debug(f"返回对象是否包含isError字段: {return_obj.get('isError') is not None}")
             
-            # 返回成功结果 - 确保内容列表只包含正确类型的对象
-            content_list = [text_content]  # 先创建内容列表
-            
-            # 创建并返回CallToolResult实例，使用具名参数
+            # 创建并返回CallToolResult实例
+            logger.info(f"工具 {tool_name} 调用成功（MCP格式）")
             return types.CallToolResult(
-                content=content_list,  # 传递内容列表
-                isError=False
+                content=content,
+                isError=result.get("isError", False)
             )
             
         except Exception as e:
-            error_msg = f"调用工具时出错: {str(e)}"
-            logger.error(error_msg)
-            logger.error(f"异常类型: {type(e).__name__}")
-            logger.error(f"异常详情: {traceback.format_exc()}")
+            logger.error(f"调用工具 {tool_name} 时出错: {str(e)}")
+            logger.error(traceback.format_exc())
             
-            try:
-                # 创建错误内容
-                text_content = types.TextContent(
-                    type="text",
-                    text=f"工具 {tool_name} 执行失败: {str(e)}"
-                )
-                
-                # 创建MCP标准错误数据
-                error_data = types.ErrorData(
-                    code=types.INTERNAL_ERROR,
-                    message=f"工具 {tool_name} 执行失败",
-                    data=str(e)
-                )
-                
-                # 返回带有错误信息的结果 - 确保内容列表只包含正确类型的对象
-                content_list = [text_content]  # 先创建内容列表
-                
-                # 创建并返回CallToolResult实例，使用具名参数
-                return types.CallToolResult(
-                    content=content_list,  # 传递内容列表
-                    isError=True,
-                    error=error_data
-                )
-                
-            except Exception as validation_error:
-                # 如果仍然失败，记录详细错误并使用最基本的响应
-                logger.critical(f"创建CallToolResult失败: {validation_error}")
-                logger.critical(f"验证错误详情: {traceback.format_exc()}")
-                
-                try:
-                    # 最基本的错误响应 - 使用最简单的方式构建
-                    minimal_text = types.TextContent(
-                        type="text",
-                        text="发生内部错误"
-                    )
-                    
-                    minimal_error = types.ErrorData(
-                        code=types.INTERNAL_ERROR,
-                        message="工具调用失败",
-                        data="创建响应对象时出现验证错误"
-                    )
-                    
-                    # 创建简单内容列表
-                    minimal_content = [minimal_text]
-                    
-                    # 使用最少的参数创建实例
-                    return types.CallToolResult(
-                        content=minimal_content,
-                        isError=True,
-                        error=minimal_error
-                    )
-                except Exception as final_error:
-                    # 如果一切都失败了，尝试只返回最基本的响应
-                    logger.critical(f"创建最小化CallToolResult失败: {final_error}")
-                    logger.critical(f"最终错误详情: {traceback.format_exc()}")
-                    
-                    # 创建一个空的内容列表，只包含一个最简单的文本内容
-                    fallback_text = types.TextContent(type="text", text="严重内部错误")
-                    
-                    # 返回绝对最小化的响应
-                    return types.CallToolResult(
-                        content=[fallback_text],
-                        isError=True
-                    )
+            # 返回错误结果
+            error_content = [{"type": "text", "text": f"调用工具时出错: {str(e)}"}]
+            return types.CallToolResult(
+                content=error_content,
+                isError=True
+            )

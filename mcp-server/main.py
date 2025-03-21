@@ -15,6 +15,11 @@ import json
 from threading import Thread
 import time
 import socket
+from typing import Dict, List, Any
+
+from tools import handlers
+from tools import fix_tuple_format  # 导入修复模块
+from mcp.types import CallToolResult, TextContent
 
 # 在main.py顶部添加，解决Windows平台的编码问题
 if sys.platform == "win32" and os.environ.get('PYTHONIOENCODING') is None:
@@ -34,6 +39,15 @@ except ImportError:
         print("无法导入MCP SDK，请确保已安装")
         mcp_info = "未知"
         mcp = None
+
+# 导入新的工具处理系统
+try:
+    from blender_addon.handlers.tools import get_handler, get_all_tools
+    print(f"已加载工具处理系统，可用工具: {list(get_all_tools().keys())}")
+except ImportError as e:
+    print(f"导入工具处理系统时出错: {str(e)}")
+    print("将使用兼容模式处理工具调用")
+    get_handler = None
 
 # 处理Windows编码问题的StreamHandler
 class EncodingSafeStreamHandler(logging.StreamHandler):
@@ -136,6 +150,93 @@ async def run_health_check(server_manager, interval=30):
             logger.error(traceback.format_exc())
         
         await asyncio.sleep(interval)
+
+# 自定义CallToolRequest处理器，使用JSON字符串而不是对象
+# 这是为了解决序列化问题
+class CustomCallToolHandler:
+    def __init__(self):
+        self.logger = logging.getLogger("BlenderMCP.CustomHandler")
+        
+    def __call__(self, name: str, arguments: Dict[str, Any] = None) -> CallToolResult:
+        """处理工具调用请求并返回符合标准的CallToolResult对象"""
+        self.logger.info(f"自定义工具处理器: {name}，参数: {json.dumps(arguments or {}, ensure_ascii=False)}")
+        
+        try:
+            # 直接调用IPC客户端发送请求
+            ipc_client = getattr(self, '_ipc_client', None)
+            if not ipc_client:
+                self.logger.error("IPC客户端未设置")
+                raise ValueError("IPC客户端未设置")
+            
+            # 构建JSON-RPC请求
+            request = {
+                "jsonrpc": "2.0",
+                "id": f"tool_call_{int(time.time())}",
+                "method": "tools/call",
+                "params": {
+                    "name": name,
+                    "arguments": arguments or {}
+                }
+            }
+            
+            # 同步发送请求
+            loop = asyncio.get_event_loop()
+            response = loop.run_until_complete(ipc_client.send_request_with_retry(request))
+            
+            self.logger.debug(f"收到原始响应: {json.dumps(response, ensure_ascii=False)}")
+            
+            # 提取响应内容
+            if isinstance(response, dict) and "result" in response:
+                result_data = response["result"]
+                
+                # 创建CallToolResult对象，直接使用原始响应的 content
+                result = CallToolResult(
+                    content=result_data.get("content", []),
+                    isError=result_data.get("isError", False)
+                )
+
+                # 记录调试信息
+                self.logger.debug(f"创建的CallToolResult类型: {type(result)}")
+                self.logger.debug(f"内容长度: {len(result.content)}")
+                
+                # 直接返回对象，避免任何序列化
+                return result
+            else:
+                # 如果返回的不是预期格式，创建一个标准结果
+                response_text = json.dumps(response, ensure_ascii=False)
+                self.logger.debug(f"非标准响应，创建文本内容: {response_text[:100]}...")
+                
+                text_content = TextContent(
+                    type="text",
+                    text=f"工具 {name} 执行成功，但返回格式异常: {response_text}"
+                )
+                
+                result = CallToolResult(
+                    content=[text_content],
+                    isError=False
+                )
+                
+                self.logger.debug(f"创建的CallToolResult类型: {type(result)}")
+                return result
+                
+        except Exception as e:
+            self.logger.error(f"自定义工具处理器出错: {str(e)}")
+            self.logger.error(traceback.format_exc())
+            
+            # 创建文本内容对象
+            text_content = TextContent(
+                type="text",
+                text=f"工具 {name} 执行失败: {str(e)}"
+            )
+            
+            # 创建并返回错误结果
+            result = CallToolResult(
+                content=[text_content],
+                isError=True
+            )
+            
+            self.logger.debug(f"创建的错误CallToolResult类型: {type(result)}")
+            return result
 
 # 主程序入口
 async def main():
@@ -305,6 +406,11 @@ async def main():
             
             # 显示协议版本
             logger.info(f"使用协议版本: {args.protocol_version}")
+            
+            # 使用自定义工具处理器
+            custom_handler = CustomCallToolHandler()
+            custom_handler._ipc_client = ipc_client  # 设置IPC客户端
+            server_manager.server._call_tool_impl = custom_handler
             
             # 启动服务器
             logger.info("开始运行服务器...")

@@ -15,6 +15,7 @@ from bpy.app.handlers import persistent
 import sys
 from . import addon
 import os
+import logging
 
 from . import logger
 
@@ -34,8 +35,55 @@ def load_handler(dummy):
     # 确保每个场景都有工具处理器
     if hasattr(bpy.types, "_mcp_server_running") and bpy.types._mcp_server_running:
         try:
+            # 首先尝试导入和加载所有工具模块
+            try:
+                import importlib
+                logger.info("开始强制加载工具模块...")
+                
+                # 导入工具系统
+                from .handlers import tools
+                importlib.reload(tools)
+                
+                # 手动导入所有工具包以确保它们被加载
+                from .handlers.tools import object_tools, material_tools, lighting_tools
+                from .handlers.tools import camera_tools, scene_tools, mesh_tools
+                from .handlers.tools import effect_tools, animation_tools, modeling_tools
+                
+                # 重新加载工具包
+                importlib.reload(object_tools)
+                importlib.reload(material_tools)
+                importlib.reload(lighting_tools)
+                importlib.reload(camera_tools)
+                importlib.reload(scene_tools)
+                importlib.reload(mesh_tools)
+                importlib.reload(effect_tools)
+                importlib.reload(animation_tools)
+                importlib.reload(modeling_tools)
+                
+                # 获取工具注册表
+                from .handlers.tools.registry import get_tool_registry
+                registry = get_tool_registry()
+                
+                # 查看工具注册情况
+                tool_count = len(registry._tools) if hasattr(registry, '_tools') else 0
+                logger.info(f"强制加载工具后，已注册工具数量: {tool_count}")
+                
+                # 输出已注册工具列表
+                if hasattr(registry, '_tools') and registry._tools:
+                    tool_names = list(registry._tools.keys())
+                    logger.info(f"已注册工具: {tool_names[:10]}...")
+                else:
+                    logger.warning("未找到任何已注册工具！")
+                
+            except Exception as e:
+                logger.error(f"强制加载工具模块时出错: {str(e)}")
+                import traceback
+                logger.error(traceback.format_exc())
+            
+            # 更新工具处理器
             from .handlers.tool_handlers import update_tools_handler
             update_tools_handler()
+            
         except Exception as e:
             logger.error(f"更新工具处理器时出错: {e}")
     
@@ -160,8 +208,22 @@ from .logger import configure_logging
 
 # 注册和注销函数
 def register():
+    # 初始化日志级别
+    try:
+        # 尝试获取debug_mode设置
+        addon_id = __package__.split('.')[0]
+        if addon_id in bpy.context.preferences.addons:
+            preferences = bpy.context.preferences.addons[addon_id].preferences
+            log_level = logging.DEBUG if preferences.debug_mode else logging.INFO
+        else:
+            log_level = logging.DEBUG  # 无法获取首选项时默认使用DEBUG级别
+    except Exception as e:
+        print(f"获取日志级别设置时出错: {str(e)}，使用默认DEBUG级别")
+        log_level = logging.DEBUG
+
     # 配置日志系统
-    configure_logging()
+    configure_logging(log_level=log_level)
+    logger.info(f"日志系统初始化，级别: {'DEBUG' if log_level == logging.DEBUG else 'INFO'}")
     
     # 先注册首选项类
     try:

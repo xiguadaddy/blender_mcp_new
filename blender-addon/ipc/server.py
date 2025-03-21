@@ -391,16 +391,42 @@ class IPCServer(threading.Thread):
                 # 处理各种MCP方法
                 if method == "tools/list":
                     logger.info("处理tools/list方法")
-                    result = tool_handlers.list_tools()
                     
-                    # 如果是JSON-RPC请求，返回标准JSON-RPC响应
-                    if is_jsonrpc:
-                        return {
-                            "jsonrpc": "2.0",
-                            "id": req_id,
-                            "result": result
-                        }
-                    return {"result": result}
+                    # 使用新的工具处理系统获取工具列表
+                    try:
+                        from ..handlers.tools import list_tools
+                        tools_list = list_tools()
+                        
+                        logger.debug(f"找到 {len(tools_list)} 个工具")
+                        
+                        # 标准MCP响应格式
+                        result = {"tools": tools_list}
+                        
+                        # 返回结果
+                        if is_jsonrpc:
+                            return {
+                                "jsonrpc": "2.0",
+                                "id": req_id,
+                                "result": result
+                            }
+                        return {"result": result}
+                    except Exception as e:
+                        logger.error(f"获取工具列表时出错: {str(e)}")
+                        import traceback
+                        logger.error(traceback.format_exc())
+                        
+                        error_data = create_error_data(
+                            -32603,
+                            f"获取工具列表时出错: {str(e)}"
+                        ).to_dict()
+                        
+                        if is_jsonrpc:
+                            return {
+                                "jsonrpc": "2.0",
+                                "id": req_id,
+                                "error": error_data
+                            }
+                        return {"error": error_data}
                     
                 elif method == "tools/call":
                     logger.info("处理tools/call方法")
@@ -422,9 +448,16 @@ class IPCServer(threading.Thread):
                             }
                         return {"error": error_data}
                     
+                    # 使用新的工具处理系统执行工具
                     try:
-                        result = tool_handlers.execute_tool(tool_name, arguments)
+                        logger.info(f"执行工具: {tool_name}, 参数: {arguments}")
+                        from ..handlers.tools import execute_tool
                         
+                        # 执行工具并获取标准格式的结果
+                        result = execute_tool(tool_name, arguments)
+                        logger.debug(f"工具执行结果: {result}")
+                        
+                        # 返回结果
                         if is_jsonrpc:
                             return {
                                 "jsonrpc": "2.0",
@@ -437,18 +470,19 @@ class IPCServer(threading.Thread):
                         logger.error(f"执行工具时出错: {str(e)}")
                         logger.error(traceback.format_exc())
                         
-                        error_data = create_error_data(
-                            -32603,
-                            f"执行工具时出错: {str(e)}"
-                        ).to_dict()
+                        # 创建标准格式的错误响应
+                        from ..handlers.tools import MCPSerializer
+                        error_content = MCPSerializer.create_text_content(f"执行工具时出错: {str(e)}")
+                        error_result = MCPSerializer.create_tool_result([error_content], is_error=True)
+                        standardized_result = MCPSerializer.standardize_result(error_result)
                         
                         if is_jsonrpc:
                             return {
                                 "jsonrpc": "2.0",
                                 "id": req_id,
-                                "error": error_data
+                                "result": standardized_result
                             }
-                        return {"error": error_data}
+                        return {"result": standardized_result}
                     
                 elif method == "resources/list":
                     logger.info("处理resources/list方法")
@@ -582,9 +616,17 @@ class IPCServer(threading.Thread):
                     return resources
                 elif action == "list_tools":
                     logger.debug("处理list_tools请求")
-                    tools = tool_handlers.list_tools()
-                    logger.info(f"返回{len(tools)}个工具")
-                    return tools
+                    # 使用新的工具处理系统获取工具列表
+                    try:
+                        from ..handlers.tools import list_tools
+                        tools_list = list_tools()
+                        logger.info(f"返回{len(tools_list)}个工具")
+                        return {"tools": tools_list}
+                    except Exception as e:
+                        logger.error(f"获取工具列表时出错: {str(e)}")
+                        import traceback
+                        logger.error(traceback.format_exc())
+                        return {"error": f"获取工具列表时出错: {str(e)}"}
                 elif action == "read_resource":
                     resource_type = request.get("type")
                     resource_id = request.get("id")
@@ -608,12 +650,18 @@ class IPCServer(threading.Thread):
                         def execute_tool_with_timeout():
                             nonlocal tool_result
                             try:
-                                result = tool_handlers.execute_tool(tool_name, arguments)
+                                # 使用新的工具处理系统执行工具
+                                from ..handlers.tools import execute_tool
+                                result = execute_tool(tool_name, arguments)
                                 tool_result = result
                                 execution_complete.set()
                             except Exception as e:
                                 logger.error(f"执行工具时出错: {e}")
-                                tool_result = {"error": str(e)}
+                                # 创建标准格式的错误响应
+                                from ..handlers.tools import MCPSerializer
+                                error_content = MCPSerializer.create_text_content(f"执行工具时出错: {str(e)}")
+                                error_result = MCPSerializer.create_tool_result([error_content], is_error=True)
+                                tool_result = MCPSerializer.standardize_result(error_result)
                                 execution_complete.set()
                         
                         # 在后台线程中执行工具
@@ -626,15 +674,29 @@ class IPCServer(threading.Thread):
                             logger.debug(f"工具执行完成: {json.dumps(tool_result)}")
                         else:
                             logger.warning(f"工具 {tool_name} 执行超时")
-                            tool_result = {"error": f"工具 {tool_name} 执行超时 (>10秒)"}
+                            # 创建标准格式的错误响应
+                            from ..handlers.tools import MCPSerializer
+                            error_content = MCPSerializer.create_text_content(f"工具 {tool_name} 执行超时 (>10秒)")
+                            error_result = MCPSerializer.create_tool_result([error_content], is_error=True)
+                            tool_result = MCPSerializer.standardize_result(error_result)
                         
                         return tool_result
                     except Exception as e:
                         logger.error(f"添加工具超时保护时出错: {e}")
                         # 如果超时机制本身出错，回退到直接执行
-                        result = tool_handlers.execute_tool(tool_name, arguments)
-                        logger.debug(f"工具执行结果: {json.dumps(result)}")
-                        return result
+                        try:
+                            # 使用新的工具处理系统执行工具
+                            from ..handlers.tools import execute_tool
+                            result = execute_tool(tool_name, arguments)
+                            logger.debug(f"工具执行结果: {json.dumps(result)}")
+                            return result
+                        except Exception as exec_err:
+                            logger.error(f"直接执行工具时出错: {exec_err}")
+                            # 创建标准格式的错误响应
+                            from ..handlers.tools import MCPSerializer
+                            error_content = MCPSerializer.create_text_content(f"执行工具时出错: {str(exec_err)}")
+                            error_result = MCPSerializer.create_tool_result([error_content], is_error=True)
+                            return MCPSerializer.standardize_result(error_result)
                 
                 # 订阅资源变化
                 elif action == "subscribe_resource":
@@ -760,57 +822,60 @@ class IPCServer(threading.Thread):
         """检查服务器是否正在运行"""
         return self.running and self.is_alive()
 
-def start_ipc_server(socket_path=None, debug_mode=False):
-    """启动IPC服务器"""
+def start_ipc_server(socket_path, debug_mode=False):
+    """
+    启动IPC服务器
+    
+    参数:
+        socket_path: 服务器套接字路径，Windows上为"port:端口号"，Unix上为套接字文件路径
+        debug_mode: 是否启用调试模式
+        
+    返回:
+        bool: 服务器启动是否成功
+    """
     global _ipc_server
     
+    # 首先重新配置日志级别
     try:
+        from ..logger import configure_logging
+        import logging
+        log_level = logging.DEBUG if debug_mode else logging.INFO
+        configure_logging(log_level=log_level)
+        logger.info(f"IPC服务器启动，设置日志级别: {'DEBUG' if debug_mode else 'INFO'}")
+    except Exception as e:
+        print(f"配置日志级别时出错: {str(e)}")
+        # 出错时继续启动服务器，但不改变日志级别
+    
+    logger.info(f"正在启动IPC服务器，通信路径: {socket_path}")
+    
+    try:
+        # 检查服务器是否已经运行
+        if _ipc_server is not None and _ipc_server.running:
+            logger.warning("IPC服务器已在运行中，无需再次启动")
+            return True
+        
+        # 停止可能已存在的服务器实例
         if _ipc_server is not None:
-            logger.warning("IPC服务器已经在运行")
-            return True  # 已经运行也视为成功
-            
-        logger.info("正在启动IPC服务器...")
+            logger.info("停止现有IPC服务器实例")
+            _ipc_server.stop()
+            _ipc_server = None
         
-        # 如果没有提供socket_path，则使用默认值
-        if socket_path is None:
-            if sys.platform == "win32":
-                socket_path = "port:27015"
-            else:
-                socket_path = os.path.join(tempfile.gettempdir(), "blender-mcp.sock")
-                
-        logger.info(f"使用socket路径: {socket_path}")
-        
-        # 快速创建和启动服务器，避免复杂的等待逻辑
+        # 创建新的服务器实例
         _ipc_server = IPCServer(socket_path, debug_mode)
         _ipc_server.start()
         
-        # 给服务器一点时间启动，但不等待太久
-        time.sleep(0.1)
+        # 设置全局标志指示服务器已启动
+        bpy.types._mcp_server_running = True
+        bpy.types._mcp_server_socket_path = socket_path
         
-        # 快速检查服务器是否启动
-        if not _ipc_server.is_alive():
-            logger.error("IPC服务器启动失败")
-            _ipc_server = None
-            return False
-            
-        logger.info("IPC服务器已启动")
-        
-        # 确保主线程处理器已注册
-        try:
-            from ..utils import thread_utils
-            thread_utils.register_main_thread_processor()
-        except Exception as e:
-            logger.error(f"注册主线程处理器失败: {e}")
-            # 但不要因为这个失败就停止服务器
-        
+        logger.info("IPC服务器启动成功")
         return True
-        
     except Exception as e:
-        logger.error(f"启动IPC服务器出错: {str(e)}")
+        logger.error(f"启动IPC服务器时出错: {str(e)}")
         import traceback
         logger.error(traceback.format_exc())
         
-        # 清理资源
+        # 确保服务器实例被正确清理
         if _ipc_server is not None:
             try:
                 _ipc_server.stop()
@@ -818,6 +883,8 @@ def start_ipc_server(socket_path=None, debug_mode=False):
                 pass
             _ipc_server = None
             
+        # 设置全局标志指示服务器未启动
+        bpy.types._mcp_server_running = False
         return False
 
 def stop_ipc_server():
@@ -826,10 +893,39 @@ def stop_ipc_server():
     
     if _ipc_server is not None:
         logger.info("正在停止IPC服务器...")
-        _ipc_server.stop()
-        _ipc_server = None
-        logger.info("IPC服务器已停止")
-        return True
+        try:
+            _ipc_server.stop()
+            _ipc_server = None
+            # 设置全局标志指示服务器已停止
+            bpy.types._mcp_server_running = False
+            if hasattr(bpy.types, "_mcp_server_socket_path"):
+                delattr(bpy.types, "_mcp_server_socket_path")
+            logger.info("IPC服务器已停止")
+            return True
+        except Exception as e:
+            logger.error(f"停止IPC服务器时出错: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            _ipc_server = None
+            # 设置全局标志指示服务器已停止
+            bpy.types._mcp_server_running = False
+            if hasattr(bpy.types, "_mcp_server_socket_path"):
+                delattr(bpy.types, "_mcp_server_socket_path")
+            return False
     else:
         logger.warning("没有正在运行的IPC服务器")
+        # 确保全局状态一致
+        bpy.types._mcp_server_running = False
+        if hasattr(bpy.types, "_mcp_server_socket_path"):
+            delattr(bpy.types, "_mcp_server_socket_path")
         return False
+
+def get_server():
+    """
+    获取全局IPC服务器实例
+    
+    Returns:
+        IPCServer: 全局IPC服务器实例，如果服务器尚未启动，则返回None
+    """
+    global _ipc_server
+    return _ipc_server

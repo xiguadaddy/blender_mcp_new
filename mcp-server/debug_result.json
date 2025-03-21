@@ -1,0 +1,5 @@
+JSON serialized data:
+{"meta":null,"content":[{"type":"text","text":"{\n  \"status\": \"success\",\n  \"object_name\": \"TestCube.004\",\n  \"location\": [\n    0.0,\n    0.0,\n    0.0\n  ]\n}","annotations":null}],"isError":false}
+
+Original object:
+meta=None content=[TextContent(type='text', text='{\n  "status": "success",\n  "object_name": "TestCube.004",\n  "location": [\n    0.0,\n    0.0,\n    0.0\n  ]\n}', annotations=None)] isError=False

@@ -30,158 +30,69 @@ def set_server_running_status(status):
     logger.debug(f"更新服务器状态: {status}")
 
 # 启动MCP服务器操作符
-class MCP_OT_StartServer(Operator):
+class StartServerOperator(bpy.types.Operator):
     bl_idname = "mcp.start_server"
     bl_label = "启动MCP服务器"
-    bl_description = "启动MCP协议服务器"
+    bl_description = "启动MCP IPC服务器"
     
     def execute(self, context):
+        global _mcp_server_running
+        
+        from ..ipc.server import start_ipc_server
+        
+        # 从首选项获取设置
+        addon_id = __package__.split('.')[0]
         try:
-            # 获取插件首选项
-            import bpy.types
+            preferences = context.preferences.addons[addon_id].preferences
+            socket_path = preferences.socket_path
+            debug_mode = preferences.debug_mode
             
-            # 获取插件ID
-            addon_id = __package__.split('.')[0]  # 提取插件的主包名
+            # 重新配置日志级别
+            try:
+                from ..logger import configure_logging
+                import logging
+                log_level = logging.DEBUG if debug_mode else logging.INFO
+                configure_logging(log_level=log_level)
+                logger.info(f"根据首选项设置日志级别: {'DEBUG' if debug_mode else 'INFO'}")
+            except Exception as e:
+                logger.error(f"设置日志级别时出错: {str(e)}")
             
-            socket_path = None
-            debug_mode = False
+            success = start_ipc_server(socket_path, debug_mode)
             
-            # 检查插件是否注册并获取首选项
-            if addon_id in context.preferences.addons:
-                preferences = context.preferences.addons[addon_id].preferences
-                if preferences is not None:
-                    socket_path = preferences.socket_path
-                    debug_mode = preferences.debug_mode
-                    logger.debug(f"从首选项获取配置: {socket_path}, 调试模式: {debug_mode}")
-                else:
-                    logger.warning(f"插件 {addon_id} 的首选项对象为None")
+            if success:
+                self.report({'INFO'}, f"MCP服务器已启动，通信路径: {socket_path}")
+                set_server_running_status(True)
+                return {'FINISHED'}
             else:
-                logger.warning(f"插件 {addon_id} 未在context.preferences.addons中找到")
-                
-            # 如果无法获取socket_path，使用默认值
-            if not socket_path:
-                if sys.platform == "win32":
-                    socket_path = "port:27015"
-                else:
-                    socket_path = os.path.join(tempfile.gettempdir(), "blender-mcp.sock")
-                logger.info(f"使用默认socket路径: {socket_path}")
-            
-            # 启动IPC服务器但避免直接导入UI模块
-            from ..core import server_manager
-            
-            # 直接启动服务器，不使用状态检测
-            self.report({'INFO'}, "正在启动MCP服务器...")
-            success = server_manager.start_server(socket_path, debug_mode)
-            
-            if not success:
-                self.report({'ERROR'}, "启动服务器失败，详情请查看控制台日志")
+                self.report({'ERROR'}, "启动MCP服务器失败")
                 return {'CANCELLED'}
-            
-            # 设置状态但不触发UI更新
-            set_server_running_status(True)
-            
-            # 简单地强制重绘所有区域，避免直接导入UI模块
-            for window in context.window_manager.windows:
-                for area in window.screen.areas:
-                    area.tag_redraw()
-            
-            # 设置MCPClient
-            if "port:" in socket_path:
-                # 从socket_path中提取端口
-                port = int(socket_path.split(":", 1)[1])
-                host = "127.0.0.1"
-            else:
-                # 使用默认配置
-                port = 27015
-                host = "127.0.0.1"
-                
-            # 设置客户端连接信息
-            context.scene.mcp_client.host = host
-            context.scene.mcp_client.port = port
-            
-            # 使用简单的状态检测，避免定时器嵌套
-            if not bpy.app.timers.is_registered(self.simple_status_check):
-                bpy.app.timers.register(self.simple_status_check, first_interval=1.0)
-            
-            self.report({'INFO'}, "MCP服务器已启动")
-            return {'FINISHED'}
-            
         except Exception as e:
-            set_server_running_status(False)
+            logger.error(f"启动服务器时出错: {str(e)}")
             self.report({'ERROR'}, f"启动服务器时出错: {str(e)}")
-            import traceback
-            traceback.print_exc()
             return {'CANCELLED'}
-            
-    def simple_status_check(self):
-        """简化的状态检查函数，避免UI模块循环导入"""
-        try:
-            # 检查服务器状态，但不更新UI
-            if not hasattr(bpy.context.scene, "mcp_client"):
-                return None  # 停止定时器
-                
-            client_info = bpy.context.scene.mcp_client
-            if hasattr(client_info, "host") and hasattr(client_info, "port"):
-                try:
-                    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    s.settimeout(0.5)
-                    s.connect((client_info.host, client_info.port))
-                    s.close()
-                    # 服务器正在运行，更新状态但不更新UI
-                    set_server_running_status(True)
-                    # 强制重绘所有区域
-                    for window in bpy.context.window_manager.windows:
-                        for area in window.screen.areas:
-                            area.tag_redraw()
-                    return 5.0  # 继续检查，但降低频率
-                except:
-                    # 连接失败，服务器可能已停止
-                    set_server_running_status(False)
-                    # 强制重绘所有区域
-                    for window in bpy.context.window_manager.windows:
-                        for area in window.screen.areas:
-                            area.tag_redraw()
-                    return None  # 停止定时器
-        except:
-            # 出现任何异常都停止定时器
-            return None
-            
-        return 5.0  # 继续检查，但降低频率
 
 # 停止MCP服务器操作符
 class MCP_OT_StopServer(Operator):
     bl_idname = "mcp.stop_server"
     bl_label = "停止MCP服务器"
-    bl_description = "停止运行中的MCP协议服务器"
+    bl_description = "停止运行中的MCP服务器"
     
     def execute(self, context):
         try:
-            # 通知用户
-            self.report({'INFO'}, "正在停止MCP服务器...")
+            from ..ipc.server import stop_ipc_server
             
-            # 使用server_manager停止服务器
-            from ..core import server_manager
-            success = server_manager.stop_server()
-            
-            if not success:
-                self.report({'ERROR'}, "停止服务器失败")
+            success = stop_ipc_server()
+            if success:
+                self.report({'INFO'}, "MCP服务器已停止")
+                set_server_running_status(False)
+                return {'FINISHED'}
+            else:
+                self.report({'WARNING'}, "MCP服务器已经停止或不存在")
+                set_server_running_status(False)
                 return {'CANCELLED'}
-            
-            # 清理状态
-            set_server_running_status(False)
-            
-            # 简单地标记需要重绘
-            for window in context.window_manager.windows:
-                for area in window.screen.areas:
-                    area.tag_redraw()
-            
-            self.report({'INFO'}, "MCP服务器已停止")
-            return {'FINISHED'}
         except Exception as e:
+            logger.error(f"停止服务器时出错: {str(e)}")
             self.report({'ERROR'}, f"停止服务器时出错: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            set_server_running_status(False)  # 确保状态一致
             return {'CANCELLED'}
 
 # 创建测试对象
@@ -564,7 +475,7 @@ class MCP_OT_ToolInfo(bpy.types.Operator):
 def register_operators():
     # 注册所有操作符类
     classes = [
-        MCP_OT_StartServer,
+        StartServerOperator,
         MCP_OT_StopServer,
         MCP_OT_CreateTestObject,
         MCP_OT_ToggleToolsList,
@@ -580,7 +491,7 @@ def register_operators():
 def unregister_operators():
     # 注销所有操作符类
     classes = [
-        MCP_OT_StartServer,
+        StartServerOperator,
         MCP_OT_StopServer,
         MCP_OT_CreateTestObject,
         MCP_OT_ToggleToolsList,

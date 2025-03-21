@@ -8,7 +8,7 @@ import logging
 import os
 import tempfile
 import sys
-
+import bpy
 # 配置日志级别映射，允许从字符串转换到日志级别
 LOG_LEVELS = {
     "DEBUG": logging.DEBUG,
@@ -19,7 +19,26 @@ LOG_LEVELS = {
 }
 
 # 默认日志级别
-DEFAULT_LOG_LEVEL = logging.DEBUG
+# 根据context.preferences.addons[addon_id].preferences.debug_mode 是否为True，决定日志级别
+def get_default_log_level(context):
+    try:
+        addon_id = __package__.split('.')[0]  # 提取插件的主包名
+        if context and hasattr(context, 'preferences') and hasattr(context.preferences, 'addons'):
+            if addon_id in context.preferences.addons:
+                preferences = context.preferences.addons[addon_id].preferences
+                if hasattr(preferences, 'debug_mode'):
+                    return logging.DEBUG if preferences.debug_mode else logging.INFO
+    except (AttributeError, TypeError, Exception) as e:
+        print(f"获取日志级别时出错: {str(e)}，使用默认DEBUG级别")
+    # 如果出现任何错误或无法找到首选项，默认使用DEBUG级别
+    return logging.DEBUG
+
+# 安全地获取默认日志级别
+try:
+    DEFAULT_LOG_LEVEL = get_default_log_level(bpy.context)
+except Exception as e:
+    print(f"设置默认日志级别时出错: {str(e)}，使用默认DEBUG级别")
+    DEFAULT_LOG_LEVEL = logging.DEBUG
 
 # 全局日志配置标志
 _logger_configured = False
