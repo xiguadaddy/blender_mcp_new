@@ -5,13 +5,14 @@
 """
 
 import bpy
-import logging
 import math
 from mathutils import Euler
 from ..tool_handlers import execute_in_main_thread
+from ...mcp_types import create_text_content, create_image_content
+from ...logger import get_logger
 
 # 设置日志
-logger = logging.getLogger("BlenderMCP.LightingTools")
+logger = get_logger("BlenderMCP.LightingTools")
 
 # 灯光创建函数
 def add_light(args):
@@ -44,6 +45,7 @@ def add_light(args):
             
             return {
                 "status": "success", 
+                "text": f"已添加{light_type}类型灯光 '{name}'",
                 "light_name": name,
                 "light_type": light_type,
                 "location": list(light_obj.location)
@@ -240,6 +242,7 @@ def get_light_info(args):
             
             return {
                 "status": "success",
+                "text": f"获取灯光 '{light_name}' 的信息",
                 "light_info": light_info
             }
             
@@ -359,4 +362,4 @@ TOOLS = {
     
     # 删除类
     "delete_light": delete_light
-} 
+}

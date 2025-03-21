@@ -2,10 +2,11 @@ import bpy
 import threading
 import time
 import queue
-import logging
+
+from ..logger import get_logger
 
 # 设置日志
-logger = logging.getLogger("BlenderMCP.ThreadUtils")
+logger = get_logger("BlenderMCP.ThreadUtils")
 
 # 用于主线程执行的命令队列
 command_queue = queue.Queue()

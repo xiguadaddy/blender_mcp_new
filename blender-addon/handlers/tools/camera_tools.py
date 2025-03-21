@@ -5,13 +5,14 @@
 """
 
 import bpy
-import logging
 import math
 from mathutils import Vector, Euler
 from ..tool_handlers import execute_in_main_thread
+from ...mcp_types import create_text_content, create_image_content
+from ...logger import get_logger
 
 # 设置日志
-logger = logging.getLogger("BlenderMCP.CameraTools")
+logger = get_logger("BlenderMCP.CameraTools")
 
 # 相机创建函数
 def add_camera(args):
@@ -40,6 +41,7 @@ def add_camera(args):
             
             return {
                 "status": "success", 
+                "text": f"已添加相机 '{name}' (镜头: {camera_data.lens}mm)",
                 "camera_name": name,
                 "location": list(camera_obj.location),
                 "rotation": list(camera_obj.rotation_euler),
@@ -333,11 +335,7 @@ def list_cameras(args):
                     
                     cameras.append(camera_info)
             
-            return {
-                "status": "success",
-                "count": len(cameras),
-                "cameras": cameras
-            }
+            return create_text_content(f"找到 {len(cameras)} 个相机")
             
         except Exception as e:
             logger.error(f"列出相机时出错: {str(e)}")
@@ -424,4 +422,4 @@ TOOLS = {
     
     # 删除类
     "delete_camera": delete_camera
-} 
+}

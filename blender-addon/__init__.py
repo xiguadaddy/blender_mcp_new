@@ -13,12 +13,13 @@ from bpy.props import StringProperty, BoolProperty, EnumProperty
 from bpy.types import AddonPreferences
 from bpy.app.handlers import persistent
 import sys
-import logging
 from . import addon
 import os
 
+from . import logger
+
 # 配置日志
-logger = logging.getLogger("BlenderMCP")
+logger = logger.get_logger("BlenderMCP")
 
 # 用于标记插件是否已完全初始化
 _initialization_complete = False
@@ -154,8 +155,14 @@ def delayed_server_start():
     
     return None  # 确保函数只运行一次
 
+# 导入日志系统
+from .logger import configure_logging
+
 # 注册和注销函数
 def register():
+    # 配置日志系统
+    configure_logging()
+    
     # 先注册首选项类
     try:
         bpy.utils.register_class(BlenderMCPPreferences)

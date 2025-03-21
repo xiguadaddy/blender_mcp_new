@@ -464,11 +464,11 @@ def register_prompt_handlers(server, ipc_client):
         
         # 使用list_prompts替代list_prompt_templates
         @server.list_prompts()
-        async def handle_list_prompt_templates():
+        async def handle_list_prompt_templates() -> List[types.Prompt]:
             """返回预定义的提示模板列表
             
             Returns:
-                List: 提示模板列表
+                List[types.Prompt]: 提示模板列表
             """
             logger.debug("处理提示模板列表请求")
             
@@ -482,61 +482,31 @@ def register_prompt_handlers(server, ipc_client):
                         name = str(tmpl['name'])
                         description = tmpl.get('description', '')
                         
-                        # 创建输入schema
-                        input_schema = {}
+                        # 准备prompt arguments
+                        prompt_args = []
                         if "parameters" in tmpl and isinstance(tmpl["parameters"], list):
-                            properties = {}
-                            required = []
-                            
                             for param in tmpl["parameters"]:
                                 if not isinstance(param, dict) or "id" not in param:
                                     continue
                                     
                                 param_id = str(param["id"])
-                                param_type = param.get("type", "string")
-                                param_title = param.get("name", param_id)
                                 param_desc = param.get("description", "")
+                                param_required = param.get("required", False)
                                 
-                                # 构建参数属性
-                                param_prop = {
-                                    "type": param_type,
-                                    "title": param_title
-                                }
-                                
-                                if param_desc:
-                                    param_prop["description"] = param_desc
-                                    
-                                # 添加默认值（如果存在）
-                                if "default" in param:
-                                    param_prop["default"] = param["default"]
-                                    
-                                # 添加枚举值（如果存在）
-                                if "options" in param and isinstance(param["options"], list):
-                                    param_prop["enum"] = [str(opt) for opt in param["options"]]
-                                
-                                properties[param_id] = param_prop
-                                
-                                # 如果参数是必需的
-                                if param.get("required", False):
-                                    required.append(param_id)
-                            
-                            # 创建JSON Schema
-                            if properties:
-                                input_schema = {
-                                    "type": "object",
-                                    "properties": properties
-                                }
-                                
-                                if required:
-                                    input_schema["required"] = required
+                                # 创建PromptArgument
+                                prompt_arg = types.PromptArgument(
+                                    name=param_id,
+                                    description=param_desc,
+                                    required=param_required
+                                )
+                                prompt_args.append(prompt_arg)
                         
-                        # 使用字典格式而不是PromptTemplate类
-                        mcp_template = {
-                            "id": template_id,
-                            "name": name,
-                            "description": description if description else None,
-                            "inputSchema": input_schema if input_schema else None
-                        }
+                        # 使用types.Prompt创建提示模板
+                        mcp_template = types.Prompt(
+                            name=template_id,
+                            description=description if description else None,
+                            arguments=prompt_args if prompt_args else None
+                        )
                         
                         mcp_templates.append(mcp_template)
                         logger.debug(f"添加提示模板: {template_id}")
@@ -552,7 +522,7 @@ def register_prompt_handlers(server, ipc_client):
        
                 
         @server.get_prompt()
-        async def handle_get_prompt(name: str, arguments: Optional[Dict[str, Any]] = None):
+        async def handle_get_prompt(name: str, arguments: Optional[Dict[str, Any]] = None) -> types.GetPromptResult:
             """获取提示内容
             
             Args:
@@ -560,7 +530,7 @@ def register_prompt_handlers(server, ipc_client):
                 arguments: 提示参数
                 
             Returns:
-                Dict: 提示内容结果
+                types.GetPromptResult: 提示内容结果
             """
             logger.debug(f"获取提示: {name}, 参数: {arguments}")
             
@@ -578,40 +548,84 @@ def register_prompt_handlers(server, ipc_client):
                         
                 if not template:
                     logger.warning(f"未找到模板: {name}")
-                    return {
-                        "isError": True,
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": f"Template '{name}' not found"
-                            }
-                        ]
-                    }
+                    # 创建错误消息
+                    error_content = types.TextContent(
+                        type="text",
+                        text=f"Template '{name}' not found"
+                    )
+                    
+                    # 创建错误数据
+                    error_data = types.ErrorData(
+                        code=types.METHOD_NOT_FOUND,
+                        message=f"提示模板 '{name}' 未找到",
+                        data=f"请求的提示模板 '{name}' 不存在，可用的模板有: " + 
+                             ", ".join([t["id"] for t in PREDEFINED_TEMPLATES])
+                    )
+                    
+                    # 创建错误消息
+                    prompt_message = types.PromptMessage(
+                        role="assistant", 
+                        content=error_content
+                    )
+                    
+                    # 返回错误结果
+                    return types.GetPromptResult(
+                        description=None,
+                        messages=[prompt_message],
+                        error=error_data,
+                        isError=True
+                    )
                 
                 # 生成响应内容
                 response_text = generate_template_content(name, arguments)
                 
-                # 返回结果
-                return {
-                    "isError": False,
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": response_text
-                        }
-                    ]
-                }
+                # 创建文本内容
+                text_content = types.TextContent(
+                    type="text",
+                    text=response_text
+                )
+                
+                # 创建提示消息
+                prompt_message = types.PromptMessage(
+                    role="assistant", 
+                    content=text_content
+                )
+                
+                # 创建并返回GetPromptResult
+                return types.GetPromptResult(
+                    description=template.get("description"),
+                    messages=[prompt_message]
+                )
             except Exception as e:
                 logger.error(f"获取提示时出错: {str(e)}")
-                return {
-                    "isError": True,
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": f"Error getting prompt: {str(e)}"
-                        }
-                    ]
-                }
+                logger.error(f"异常详情: {traceback.format_exc()}")
+                
+                # 创建错误消息
+                error_content = types.TextContent(
+                    type="text",
+                    text=f"Error getting prompt: {str(e)}"
+                )
+                
+                # 创建错误数据
+                error_data = types.ErrorData(
+                    code=types.INTERNAL_ERROR,
+                    message="获取提示时发生内部错误",
+                    data=str(e)
+                )
+                
+                # 创建错误消息
+                prompt_message = types.PromptMessage(
+                    role="assistant", 
+                    content=error_content
+                )
+                
+                # 返回错误结果
+                return types.GetPromptResult(
+                    description=None,
+                    messages=[prompt_message],
+                    error=error_data,
+                    isError=True
+                )
                 
         logger.info("成功注册提示处理程序")
         return True

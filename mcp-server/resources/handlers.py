@@ -5,6 +5,7 @@ import mcp.types as types
 from pydantic import AnyUrl
 from typing import List, Dict, Any, Optional, Union
 import re
+import traceback
 
 # 配置日志
 logger = logging.getLogger("BlenderMCP.Server")
@@ -263,12 +264,27 @@ def register_resource_handlers(server, ipc_client):
             match = re.match(r'blender://([^/]+)/(.+)', uri_str)
             if not match:
                 logger.error(f"无效的资源URI格式: {uri_str}")
+                error_text = f"无效的资源URI格式，应为 blender://类型/ID"
+                
+                # 创建错误数据
+                error_data = types.ErrorData(
+                    code=types.INVALID_PARAMS,
+                    message="无效的资源URI格式",
+                    data=f"提供的URI '{uri_str}' 不匹配所需格式"
+                )
+                
+                # 创建资源内容
+                text_resource = types.TextResourceContents(
+                    uri=uri_str,
+                    text=error_text,
+                    mimeType="text/plain"
+                )
+                
+                # 返回错误结果
                 return types.ReadResourceResult(
-                    isError=True,
-                    content=[types.TextContent(
-                        type="text",
-                        text=f"无效的资源URI格式，应为 blender://类型/ID"
-                    )]
+                    contents=[text_resource],
+                    error=error_data,
+                    isError=True
                 )
             
             resource_type = match.group(1)
@@ -283,24 +299,45 @@ def register_resource_handlers(server, ipc_client):
             
             # 检查是否有错误
             if isinstance(resource_data, dict) and "error" in resource_data:
-                logger.error(f"读取资源出错: {resource_data['error']}")
+                error_msg = resource_data['error']
+                logger.error(f"读取资源出错: {error_msg}")
+                
+                # 创建错误数据
+                error_data = types.ErrorData(
+                    code=types.INTERNAL_ERROR,
+                    message="读取资源失败",
+                    data=error_msg
+                )
+                
+                # 创建资源内容
+                text_resource = types.TextResourceContents(
+                    uri=uri_str,
+                    text=f"读取资源出错: {error_msg}",
+                    mimeType="text/plain"
+                )
+                
+                # 返回错误结果
                 return types.ReadResourceResult(
-                    isError=True,
-                    content=[types.TextContent(
-                        type="text",
-                        text=f"读取资源出错: {resource_data['error']}"
-                    )]
+                    contents=[text_resource],
+                    error=error_data,
+                    isError=True
                 )
             
             # 将资源数据转换为适当的内容类型
             if resource_type == "image" and isinstance(resource_data, dict) and "base64_data" in resource_data:
                 # 如果是图像数据，返回图像内容
+                mime_type = resource_data.get("mime_type", "image/png")
+                
+                # 创建二进制资源内容
+                blob_resource = types.BlobResourceContents(
+                    uri=uri_str,
+                    blob=resource_data["base64_data"],
+                    mimeType=mime_type
+                )
+                
+                # 返回成功结果
                 return types.ReadResourceResult(
-                    isError=False,
-                    content=[types.ImageContent(
-                        type="image",
-                        data=resource_data["base64_data"]
-                    )]
+                    contents=[blob_resource]
                 )
             
             # 默认情况下，返回JSON格式的资源数据
@@ -311,22 +348,45 @@ def register_resource_handlers(server, ipc_client):
                 resource_text = str(resource_data)
             
             logger.debug(f"资源 {uri} 读取成功")
+            
+            # 创建文本资源内容
+            text_resource = types.TextResourceContents(
+                uri=uri_str,
+                text=resource_text,
+                mimeType="application/json"
+            )
+            
+            # 返回成功结果
             return types.ReadResourceResult(
-                isError=False,
-                content=[types.TextContent(
-                    type="text",
-                    text=resource_text
-                )]
+                contents=[text_resource]
             )
             
         except Exception as e:
             logger.error(f"读取资源时出错: {str(e)}")
+            logger.error(f"异常详情: {traceback.format_exc()}")
+            
+            # 创建错误数据
+            error_data = types.ErrorData(
+                code=types.INTERNAL_ERROR,
+                message="读取资源时发生内部错误",
+                data=str(e)
+            )
+            
+            # 确保URI字符串可用
+            uri_str = str(uri) if uri else "unknown://resource"
+            
+            # 创建资源内容
+            text_resource = types.TextResourceContents(
+                uri=uri_str,
+                text=f"读取资源时出错: {str(e)}",
+                mimeType="text/plain"
+            )
+            
+            # 返回错误结果
             return types.ReadResourceResult(
-                isError=True,
-                content=[types.TextContent(
-                    type="text",
-                    text=f"读取资源时出错: {str(e)}"
-                )]
+                contents=[text_resource],
+                error=error_data,
+                isError=True
             )
     
     @server.subscribe_resource()

@@ -8,12 +8,13 @@ import bpy
 import bmesh
 import mathutils
 import math
-import logging
 from mathutils import Vector
 from ..tool_handlers import execute_in_main_thread
+from ...mcp_types import create_text_content, create_image_content
+from ...logger import get_logger
 
 # 设置日志
-logger = logging.getLogger("BlenderMCP.ModelingTools")
+logger = get_logger("BlenderMCP.ModelingTools")
 
 # ---------- 网格编辑功能 ----------
 
@@ -76,6 +77,7 @@ def extrude_faces(args):
             
             return {
                 "status": "success",
+                "text": f"已挤出对象 '{object_name}' 的 {len(face_indices)} 个面",
                 "extruded_faces": len(face_indices),
                 "object": object_name
             }
@@ -116,7 +118,8 @@ def subdivide_mesh(args):
             bpy.ops.object.mode_set(mode=current_mode)
             
             return {
-                "status": "success", 
+                "status": "success",
+                "text": f"已细分对象 '{object_name}' (切割数: {cuts}, 顶点数: {len(obj.data.vertices)})",
                 "object": object_name,
                 "cuts": cuts,
                 "vertex_count": len(obj.data.vertices)
@@ -291,6 +294,7 @@ def boolean_operation(args):
             
             return {
                 "status": "success",
+                "text": f"对象 '{object_name}' 与 '{tool_object_name}' 进行了 {operation} 布尔操作",
                 "object": object_name,
                 "operation": operation
             }
@@ -439,7 +443,7 @@ def knife_cut(args):
             bm = bmesh.from_edit_mesh(obj.data)
             
             # 执行切割
-            # 注意: bmesh不提供直接的knife_cut操作，这里我们使用bmesh.ops.bisect_plane来模拟
+            # 注意: bmesh不提供直接的knife_cut操作，这里我们使用 bmesh.ops.bisect_plane 来模拟
             
             # 计算切割平面的法线和原点
             points_3d = [Vector(p) for p in cut_points]
@@ -738,4 +742,4 @@ TOOLS = {
     # 对象操作
     "join_objects": join_objects,
     "separate_mesh": separate_mesh
-} 
+}

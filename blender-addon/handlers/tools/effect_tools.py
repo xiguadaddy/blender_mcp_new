@@ -5,11 +5,12 @@
 """
 
 import bpy
-import logging
 from ..tool_handlers import execute_in_main_thread
+from ...mcp_types import create_text_content, create_image_content
+from ...logger import get_logger
 
 # 设置日志
-logger = logging.getLogger("BlenderMCP.EffectTools")
+logger = get_logger("BlenderMCP.EffectTools")
 
 # ---------- 粒子特效 ----------
 
@@ -87,6 +88,7 @@ def create_particle_system(args):
 
             return {
                 "status": "success",
+                "text": f"已为对象 '{object_name}' 创建含 {particles_count} 个粒子的 {particle_type} 粒子系统",
                 "object_name": object_name,
                 "particles_count": particles_count,
                 "particle_type": particle_type,

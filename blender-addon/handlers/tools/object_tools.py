@@ -5,14 +5,15 @@
 """
 
 import bpy
-import logging
 import bmesh
 from mathutils import Vector, Euler
 import json
 from ..tool_handlers import execute_in_main_thread
+from ...mcp_types import create_text_content, create_image_content
+from ...logger import get_logger
 
 # 设置日志
-logger = logging.getLogger("BlenderMCP.ObjectTools")
+logger = get_logger("BlenderMCP.ObjectTools")
 
 # 对象创建函数
 def create_object(args):
@@ -44,8 +45,10 @@ def create_object(args):
                 empty.empty_display_size = size
                 bpy.context.collection.objects.link(empty)
                 bpy.context.view_layer.objects.active = empty
+                message = f"已创建{obj_type}对象 '{empty.name}'"
                 return {
                     "status": "success", 
+                    "text": message,
                     "object_name": empty.name,
                     "location": list(empty.location)
                 }
@@ -56,8 +59,10 @@ def create_object(args):
             obj = bpy.context.active_object
             obj.name = name
             
+            message = f"已创建{obj_type}对象 '{obj.name}'"
             return {
                 "status": "success", 
+                "text": message,
                 "object_name": obj.name,
                 "location": list(obj.location)
             }
@@ -457,6 +462,7 @@ def get_object_info(args):
                 
             return {
                 "status": "success",
+                "text": f"获取对象 '{object_name}' 的信息",
                 "info": info
             }
             
@@ -502,8 +508,15 @@ def list_objects(args):
                 
                 objects.append(obj_info)
             
+            msg = f"找到 {len(objects)} 个对象"
+            if filter_type:
+                msg += f" (类型: {filter_type})"
+            if collection_name:
+                msg += f" (集合: {collection_name})"
+                
             return {
                 "status": "success",
+                "text": msg,
                 "count": len(objects),
                 "objects": objects
             }
@@ -629,4 +642,4 @@ TOOLS = {
     
     # 删除类
     "delete_object": delete_object
-} 
+}

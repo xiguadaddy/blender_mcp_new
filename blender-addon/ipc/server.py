@@ -3,26 +3,20 @@ import threading
 import json
 import os
 import bpy
-import logging
 import sys
 import tempfile
 import time
 from ..handlers import resource_handlers, tool_handlers
+from ..mcp_types import (
+    RequestId,
+    ErrorData,
+    create_error_data
+)
+from ..logger import get_logger
 
 # 设置日志
-logger = logging.getLogger("BlenderMCP.IPC")
-# 配置日志格式
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-# 添加控制台处理器
-console_handler = logging.StreamHandler()
-console_handler.setFormatter(formatter)
-logger.addHandler(console_handler)
+logger = get_logger("BlenderMCP.IPC")
 
-# 添加文件处理器
-log_file = os.path.join(tempfile.gettempdir(), "blender_mcp_ipc.log")
-file_handler = logging.FileHandler(log_file, mode='a')
-file_handler.setFormatter(formatter)
-logger.addHandler(file_handler)
 
 # 全局IPC服务器实例
 _ipc_server = None
@@ -55,11 +49,6 @@ class IPCServer(threading.Thread):
                 self.port = 27015
             self.host = "127.0.0.1"  # 本地回环地址
             
-        # 配置日志级别
-        if debug_mode:
-            logger.setLevel(logging.DEBUG)
-        else:
-            logger.setLevel(logging.INFO)
         
         logger.info(f"IPC服务器初始化完成，{'使用调试模式' if debug_mode else '使用普通模式'}")
         logger.debug(f"平台: {'Windows' if self.is_windows else 'Unix/Linux/MacOS'}")
@@ -304,10 +293,31 @@ class IPCServer(threading.Thread):
                     # 添加客户端引用到请求中，用于资源订阅
                     request["_client"] = client_socket
                     
+                    # 检查请求类型
+                    is_jsonrpc = "jsonrpc" in request and "id" in request
+                    has_method = "method" in request
+                    has_action = "action" in request
+                    
                     # 添加更多详细日志
-                    logger.debug(f"收到IPC请求: {request}")
+                    if is_jsonrpc:
+                        logger.debug(f"收到JSON-RPC请求: id={request.get('id')}, method={request.get('method')}")
+                    elif has_method:
+                        logger.debug(f"收到MCP方法请求: {request.get('method')}")
+                    elif has_action:
+                        logger.debug(f"收到Action请求: {request.get('action')}")
+                    else:
+                        logger.debug(f"收到未知类型请求: {request}")
+                    
+                    # 处理请求
                     response = self.handle_request(request)
-                    logger.debug(f"发送IPC响应: {response.get('status', 'unknown')} ({len(str(response))} 字节)")
+                    
+                    # 记录响应类型
+                    if "error" in response:
+                        logger.debug(f"发送错误响应: {response.get('error')}")
+                    elif "result" in response:
+                        logger.debug(f"发送成功响应: 结果类型={type(response.get('result'))}")
+                    else:
+                        logger.debug(f"发送响应: {response.get('status', 'unknown')} ({len(str(response))} 字节)")
                     
                     # 发送响应
                     response_json = json.dumps(response)
@@ -319,11 +329,28 @@ class IPCServer(threading.Thread):
                 except ConnectionError as e:
                     logger.debug(f"客户端连接关闭: {str(e)}")
                     break
+                except json.JSONDecodeError as e:
+                    logger.error(f"JSON解析错误: {str(e)}")
+                    # 尝试发送错误响应
+                    error_data = create_error_data(-32700, f"解析错误: {str(e)}").to_dict()
+                    error_response = json.dumps({
+                        "jsonrpc": "2.0",
+                        "id": None,
+                        "error": error_data
+                    })
+                    client_socket.sendall(f"{len(error_response)}:".encode() + error_response.encode())
                 except Exception as e:
                     logger.error(f"处理客户端消息时出错: {str(e)}")
+                    import traceback
+                    logger.error(traceback.format_exc())
                     try:
                         # 尝试发送错误响应
-                        error_response = json.dumps({"error": str(e)})
+                        error_data = create_error_data(-32603, f"内部错误: {str(e)}").to_dict()
+                        error_response = json.dumps({
+                            "jsonrpc": "2.0",
+                            "id": None,
+                            "error": error_data
+                        })
                         client_socket.sendall(f"{len(error_response)}:".encode() + error_response.encode())
                     except:
                         # 无法发送错误响应，则关闭连接
@@ -351,171 +378,340 @@ class IPCServer(threading.Thread):
         method = request.get("method")
         logger.debug(f"处理请求: action={action}, method={method}")
         
+        # 检查是否为JSON-RPC请求
+        jsonrpc = request.get("jsonrpc")
+        req_id = request.get("id")
+        is_jsonrpc = jsonrpc == "2.0" and req_id is not None
+        
         try:
             # 处理MCP方法请求
-            if method == "mcp/listTools":
-                logger.info("收到MCP/listTools请求")
-                tools = tool_handlers.list_tools()
-                logger.debug(f"返回工具列表，共{len(tools)}个工具")
-                return {"result": {"tools": tools}}
-            elif method == "mcp/listResources":
-                logger.info("收到MCP/listResources请求")
-                try:
-                    # 添加超时保护，最多等待3秒
-                    import time
-                    import threading
+            if method is not None:
+                logger.info(f"收到MCP方法请求: {method}")
+                
+                # 处理各种MCP方法
+                if method == "tools/list":
+                    logger.info("处理tools/list方法")
+                    result = tool_handlers.list_tools()
                     
-                    result = {"resources": []}
-                    completed = threading.Event()
-                    
-                    def fetch_resources():
-                        try:
-                            resources = resource_handlers.handle_list_resources()
-                            result["resources"] = resources
-                            completed.set()
-                        except Exception as e:
-                            logger.error(f"获取资源列表时出错: {e}")
-                            completed.set()
-                    
-                    # 在后台线程中获取资源
-                    thread = threading.Thread(target=fetch_resources)
-                    thread.daemon = True
-                    thread.start()
-                    
-                    # 等待结果，最多3秒
-                    if completed.wait(3.0):
-                        logger.debug(f"返回资源列表，共{len(result['resources'])}个资源")
-                    else:
-                        logger.warning("获取资源列表超时，返回空列表")
-                        
+                    # 如果是JSON-RPC请求，返回标准JSON-RPC响应
+                    if is_jsonrpc:
+                        return {
+                            "jsonrpc": "2.0",
+                            "id": req_id,
+                            "result": result
+                        }
                     return {"result": result}
-                except Exception as e:
-                    logger.error(f"处理listResources请求时出错: {e}")
-                    import traceback
-                    logger.error(traceback.format_exc())
-                    return {"result": {"resources": []}}
+                    
+                elif method == "tools/call":
+                    logger.info("处理tools/call方法")
+                    params = request.get("params", {})
+                    tool_name = params.get("name")
+                    arguments = params.get("arguments", {})
+                    
+                    if not tool_name:
+                        error_data = create_error_data(
+                            -32602,
+                            "无效的工具参数，缺少tool_name"
+                        ).to_dict()
+                        
+                        if is_jsonrpc:
+                            return {
+                                "jsonrpc": "2.0",
+                                "id": req_id,
+                                "error": error_data
+                            }
+                        return {"error": error_data}
+                    
+                    try:
+                        result = tool_handlers.execute_tool(tool_name, arguments)
+                        
+                        if is_jsonrpc:
+                            return {
+                                "jsonrpc": "2.0",
+                                "id": req_id,
+                                "result": result
+                            }
+                        return {"result": result}
+                    except Exception as e:
+                        import traceback
+                        logger.error(f"执行工具时出错: {str(e)}")
+                        logger.error(traceback.format_exc())
+                        
+                        error_data = create_error_data(
+                            -32603,
+                            f"执行工具时出错: {str(e)}"
+                        ).to_dict()
+                        
+                        if is_jsonrpc:
+                            return {
+                                "jsonrpc": "2.0",
+                                "id": req_id,
+                                "error": error_data
+                            }
+                        return {"error": error_data}
+                    
+                elif method == "resources/list":
+                    logger.info("处理resources/list方法")
+                    try:
+                        # 添加超时保护，最多等待3秒
+                        import time
+                        import threading
+                        
+                        resources = resource_handlers.handle_list_resources()
+                        
+                        if is_jsonrpc:
+                            return {
+                                "jsonrpc": "2.0",
+                                "id": req_id,
+                                "result": resources
+                            }
+                        return {"result": resources}
+                    except Exception as e:
+                        logger.error(f"处理resources/list请求时出错: {e}")
+                        import traceback
+                        logger.error(traceback.format_exc())
+                        
+                        error_data = create_error_data(
+                            -32603,
+                            f"处理resources/list请求时出错: {str(e)}"
+                        ).to_dict()
+                        
+                        if is_jsonrpc:
+                            return {
+                                "jsonrpc": "2.0",
+                                "id": req_id,
+                                "error": error_data
+                            }
+                        return {"error": error_data}
+                    
+                elif method == "resources/read":
+                    logger.info("处理resources/read方法")
+                    params = request.get("params", {})
+                    uri = params.get("uri")
+                    
+                    if not uri:
+                        error_data = create_error_data(
+                            -32602,
+                            "无效的资源参数，缺少uri"
+                        ).to_dict()
+                        
+                        if is_jsonrpc:
+                            return {
+                                "jsonrpc": "2.0",
+                                "id": req_id,
+                                "error": error_data
+                            }
+                        return {"error": error_data}
+                    
+                    try:
+                        # 解析URI
+                        if uri.startswith("blender://"):
+                            # 去除协议部分
+                            path = uri[len("blender://"):]
+                            # 分割资源类型和ID
+                            parts = path.split('/')
+                            if len(parts) < 2:
+                                raise ValueError(f"无效的Blender资源URI: {uri}")
+                                
+                            resource_type = parts[0]
+                            resource_id = '/'.join(parts[1:])
+                            
+                            # 读取资源
+                            result = resource_handlers.handle_read_resource(resource_type, resource_id)
+                            
+                            if is_jsonrpc:
+                                return {
+                                    "jsonrpc": "2.0",
+                                    "id": req_id,
+                                    "result": result
+                                }
+                            return {"result": result}
+                        else:
+                            error_data = create_error_data(
+                                -32602,
+                                f"不支持的URI协议: {uri}"
+                            ).to_dict()
+                            
+                            if is_jsonrpc:
+                                return {
+                                    "jsonrpc": "2.0",
+                                    "id": req_id,
+                                    "error": error_data
+                                }
+                            return {"error": error_data}
+                    except Exception as e:
+                        import traceback
+                        logger.error(f"处理resources/read请求时出错: {str(e)}")
+                        logger.error(traceback.format_exc())
+                        
+                        error_data = create_error_data(
+                            -32603,
+                            f"处理resources/read请求时出错: {str(e)}"
+                        ).to_dict()
+                        
+                        if is_jsonrpc:
+                            return {
+                                "jsonrpc": "2.0",
+                                "id": req_id,
+                                "error": error_data
+                            }
+                        return {"error": error_data}
                 
-            # 资源相关操作
-            if action == "list_resources":
-                logger.debug("处理list_resources请求")
-                resources = resource_handlers.handle_list_resources()
-                logger.debug(f"找到{len(resources)}个资源")
-                return resources
-            elif action == "list_tools":
-                logger.debug("处理list_tools请求")
-                tools = tool_handlers.list_tools()
-                logger.info(f"返回{len(tools)}个工具")
-                return tools
-            elif action == "read_resource":
-                resource_type = request.get("type")
-                resource_id = request.get("id")
-                logger.debug(f"处理read_resource请求: type={resource_type}, id={resource_id}")
-                return resource_handlers.handle_read_resource(resource_type, resource_id)
-                
-            # 工具相关操作
-            elif action == "call_tool":
-                tool_name = request.get("tool")
-                arguments = request.get("arguments", {})
-                logger.info(f"执行工具: {tool_name}, 参数: {json.dumps(arguments)}")
-                
-                # 添加超时保护，最多等待10秒
-                try:
-                    import threading
-                    import time
+                else:
+                    # 处理未知MCP方法
+                    error_data = create_error_data(
+                        -32601,
+                        f"未知方法: {method}"
+                    ).to_dict()
                     
-                    tool_result = {"error": "工具执行超时"}
-                    execution_complete = threading.Event()
-                    
-                    def execute_tool_with_timeout():
-                        nonlocal tool_result
-                        try:
-                            result = tool_handlers.execute_tool(tool_name, arguments)
-                            tool_result = result
-                            execution_complete.set()
-                        except Exception as e:
-                            logger.error(f"执行工具时出错: {e}")
-                            tool_result = {"error": str(e)}
-                            execution_complete.set()
-                    
-                    # 在后台线程中执行工具
-                    thread = threading.Thread(target=execute_tool_with_timeout)
-                    thread.daemon = True
-                    thread.start()
-                    
-                    # 等待最多10秒
-                    if execution_complete.wait(10.0):
-                        logger.debug(f"工具执行完成: {json.dumps(tool_result)}")
-                    else:
-                        logger.warning(f"工具 {tool_name} 执行超时")
-                        tool_result = {"error": f"工具 {tool_name} 执行超时 (>10秒)"}
-                    
-                    return tool_result
-                except Exception as e:
-                    logger.error(f"添加工具超时保护时出错: {e}")
-                    # 如果超时机制本身出错，回退到直接执行
-                    result = tool_handlers.execute_tool(tool_name, arguments)
-                    logger.debug(f"工具执行结果: {json.dumps(result)}")
-                    return result
-                
-            # 订阅资源变化
-            elif action == "subscribe_resource":
-                resource_uri = request.get("uri")
-                client_socket = request.get("_client_socket")
-                
-                logger.debug(f"处理资源订阅请求: {resource_uri}")
-                
-                if not resource_uri or not client_socket:
-                    return {"error": "缺少必要参数"}
-                    
-                if resource_uri not in self.subscribed_resources:
-                    self.subscribed_resources[resource_uri] = []
-                    
-                if client_socket not in self.subscribed_resources[resource_uri]:
-                    self.subscribed_resources[resource_uri].append(client_socket)
-                    
-                logger.debug(f"客户端已订阅资源 {resource_uri}")
-                return {"status": "success", "message": f"已订阅资源 {resource_uri}"}
-                
-            # 取消订阅资源变化
-            elif action == "unsubscribe_resource":
-                resource_uri = request.get("uri")
-                client_socket = request.get("_client_socket")
-                
-                logger.debug(f"处理资源取消订阅请求: {resource_uri}")
-                
-                if not resource_uri or not client_socket:
-                    return {"error": "缺少必要参数"}
-                    
-                if resource_uri in self.subscribed_resources and client_socket in self.subscribed_resources[resource_uri]:
-                    self.subscribed_resources[resource_uri].remove(client_socket)
-                    logger.debug(f"客户端已取消订阅资源 {resource_uri}")
-                    
-                return {"status": "success", "message": f"已取消订阅资源 {resource_uri}"}
+                    if is_jsonrpc:
+                        return {
+                            "jsonrpc": "2.0",
+                            "id": req_id,
+                            "error": error_data
+                        }
+                    return {"error": error_data}
             
-            # 测试命令
-            elif action == "test":
-                logger.debug("处理测试请求")
-                return {"status": "success", "server_time": time.time()}
+            # 处理传统action请求
+            elif action is not None:
+                # 资源相关操作
+                if action == "list_resources":
+                    logger.debug("处理list_resources请求")
+                    resources = resource_handlers.handle_list_resources()
+                    logger.debug(f"找到{len(resources)}个资源")
+                    return resources
+                elif action == "list_tools":
+                    logger.debug("处理list_tools请求")
+                    tools = tool_handlers.list_tools()
+                    logger.info(f"返回{len(tools)}个工具")
+                    return tools
+                elif action == "read_resource":
+                    resource_type = request.get("type")
+                    resource_id = request.get("id")
+                    logger.debug(f"处理read_resource请求: type={resource_type}, id={resource_id}")
+                    return resource_handlers.handle_read_resource(resource_type, resource_id)
+                    
+                # 工具相关操作
+                elif action == "call_tool":
+                    tool_name = request.get("tool")
+                    arguments = request.get("arguments", {})
+                    logger.info(f"执行工具: {tool_name}, 参数: {json.dumps(arguments)}")
+                    
+                    # 添加超时保护，最多等待10秒
+                    try:
+                        import threading
+                        import time
+                        
+                        tool_result = {"error": "工具执行超时"}
+                        execution_complete = threading.Event()
+                        
+                        def execute_tool_with_timeout():
+                            nonlocal tool_result
+                            try:
+                                result = tool_handlers.execute_tool(tool_name, arguments)
+                                tool_result = result
+                                execution_complete.set()
+                            except Exception as e:
+                                logger.error(f"执行工具时出错: {e}")
+                                tool_result = {"error": str(e)}
+                                execution_complete.set()
+                        
+                        # 在后台线程中执行工具
+                        thread = threading.Thread(target=execute_tool_with_timeout)
+                        thread.daemon = True
+                        thread.start()
+                        
+                        # 等待最多10秒
+                        if execution_complete.wait(10.0):
+                            logger.debug(f"工具执行完成: {json.dumps(tool_result)}")
+                        else:
+                            logger.warning(f"工具 {tool_name} 执行超时")
+                            tool_result = {"error": f"工具 {tool_name} 执行超时 (>10秒)"}
+                        
+                        return tool_result
+                    except Exception as e:
+                        logger.error(f"添加工具超时保护时出错: {e}")
+                        # 如果超时机制本身出错，回退到直接执行
+                        result = tool_handlers.execute_tool(tool_name, arguments)
+                        logger.debug(f"工具执行结果: {json.dumps(result)}")
+                        return result
                 
-            # 停止服务器
-            elif action == "stop" or request.get("command") == "stop":
-                logger.info("收到停止服务器请求")
-                self.running = False
-                return {"status": "shutting_down"}
+                # 订阅资源变化
+                elif action == "subscribe_resource":
+                    resource_uri = request.get("uri")
+                    client_socket = request.get("_client_socket")
+                    
+                    logger.debug(f"处理资源订阅请求: {resource_uri}")
+                    
+                    if not resource_uri or not client_socket:
+                        return {"error": "缺少必要参数"}
+                        
+                    if resource_uri not in self.subscribed_resources:
+                        self.subscribed_resources[resource_uri] = []
+                        
+                    if client_socket not in self.subscribed_resources[resource_uri]:
+                        self.subscribed_resources[resource_uri].append(client_socket)
+                        
+                    logger.debug(f"客户端已订阅资源 {resource_uri}")
+                    return {"status": "success", "message": f"已订阅资源 {resource_uri}"}
+                    
+                # 取消订阅资源变化
+                elif action == "unsubscribe_resource":
+                    resource_uri = request.get("uri")
+                    client_socket = request.get("_client_socket")
+                    
+                    logger.debug(f"处理资源取消订阅请求: {resource_uri}")
+                    
+                    if not resource_uri or not client_socket:
+                        return {"error": "缺少必要参数"}
+                        
+                    if resource_uri in self.subscribed_resources and client_socket in self.subscribed_resources[resource_uri]:
+                        self.subscribed_resources[resource_uri].remove(client_socket)
+                        logger.debug(f"客户端已取消订阅资源 {resource_uri}")
+                        
+                    return {"status": "success", "message": f"已取消订阅资源 {resource_uri}"}
                 
-            # 获取服务器状态
-            elif action == "status":
-                logger.debug("处理状态请求")
-                return {
-                    "status": "running",
-                    "uptime": time.time() - self.start_time if hasattr(self, 'start_time') else 0,
-                    "clients_count": len(self.clients),
-                    "subscriptions_count": sum(len(clients) for clients in self.subscribed_resources.values())
-                }
-                
+                # 测试命令
+                elif action == "test":
+                    logger.debug("处理测试请求")
+                    return {"status": "success", "server_time": time.time()}
+                    
+                # 停止服务器
+                elif action == "stop" or request.get("command") == "stop":
+                    logger.info("收到停止服务器请求")
+                    self.running = False
+                    return {"status": "shutting_down"}
+                    
+                # 获取服务器状态
+                elif action == "status":
+                    logger.debug("处理状态请求")
+                    return {
+                        "status": "running",
+                        "uptime": time.time() - self.start_time if hasattr(self, 'start_time') else 0,
+                        "clients_count": len(self.clients),
+                        "subscriptions_count": sum(len(clients) for clients in self.subscribed_resources.values())
+                    }
+                    
+                else:
+                    error_msg = f"未知操作: {action}"
+                    logger.warning(error_msg)
+                    return {"error": error_msg}
+                    
             else:
-                error_msg = f"未知操作: {action or method}"
+                error_msg = "请求中未指定action或method"
                 logger.warning(error_msg)
+                
+                error_data = create_error_data(
+                    -32600,
+                    error_msg
+                ).to_dict()
+                
+                if is_jsonrpc:
+                    return {
+                        "jsonrpc": "2.0",
+                        "id": req_id,
+                        "error": error_data
+                    }
                 return {"error": error_msg}
                 
         except Exception as e:
@@ -523,6 +719,18 @@ class IPCServer(threading.Thread):
             error_msg = f"处理请求时出错: {str(e)}"
             logger.error(error_msg)
             logger.error(traceback.format_exc())
+            
+            error_data = create_error_data(
+                -32603,
+                error_msg
+            ).to_dict()
+            
+            if is_jsonrpc:
+                return {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "error": error_data
+                }
             return {"error": error_msg}
         
     def stop(self):

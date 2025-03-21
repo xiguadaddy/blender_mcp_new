@@ -3,27 +3,23 @@ import json
 import bmesh
 from mathutils import Vector
 import base64
-import logging
 import os
 import tempfile
 from ..utils import thread_utils
+from ..mcp_types import (
+    create_text_resource_contents,
+    create_blob_resource_contents,
+    create_error_data,
+    ReadResourceResult,
+    TextResourceContents,
+    BlobResourceContents
+)
+from ..logger import get_logger
 
 # 设置日志
-logger = logging.getLogger("BlenderMCP.Resources")
-# 配置日志格式
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-# 添加控制台处理器
-console_handler = logging.StreamHandler()
-console_handler.setFormatter(formatter)
-logger.addHandler(console_handler)
+logger = get_logger("BlenderMCP.Resources")
 
-# 添加文件处理器
-log_file = os.path.join(tempfile.gettempdir(), "blender_mcp_resources.log")
-file_handler = logging.FileHandler(log_file, mode='a')
-file_handler.setFormatter(formatter)
-logger.addHandler(file_handler)
 
-logger.setLevel(logging.DEBUG)
 
 # 资源变更跟踪变量
 resource_state = {
@@ -290,31 +286,143 @@ def handle_list_resources():
         return simple_get_resources()
 
 def handle_read_resource(resource_type, resource_id):
-    """读取指定资源的详细信息"""
+    """读取指定资源数据"""
     logger.debug(f"处理read_resource请求: type={resource_type}, id={resource_id}")
     
+    result = ReadResourceResult()
+    
     try:
+        # 异步在主线程中获取资源数据
         if resource_type == "mesh":
-            return extract_mesh_data(resource_id)
-        elif resource_type == "material":
-            return extract_material_data(resource_id)
-        elif resource_type == "light":
-            return extract_light_data(resource_id)
-        elif resource_type == "camera":
-            return extract_camera_data(resource_id)
-        elif resource_type == "scene":
-            return extract_scene_data(resource_id)
-        else:
-            error_msg = f"未知资源类型: {resource_type}"
-            logger.warning(error_msg)
-            return {"error": error_msg}
+            data = execute_in_main_thread(extract_mesh_data, resource_id)
+            if "error" in data:
+                logger.error(f"获取网格数据时出错: {data['error']}")
+                # 创建带有错误信息的文本内容
+                contents = create_text_resource_contents(
+                    uri=f"blender://mesh/{resource_id}",
+                    text=json.dumps({"error": data["error"]}),
+                    mime_type="application/json"
+                )
+                result.contents.append(contents)
+                return result.to_dict()
+                
+            # 创建带有网格数据的文本内容
+            contents = create_text_resource_contents(
+                uri=f"blender://mesh/{resource_id}",
+                text=json.dumps(data),
+                mime_type="application/json"
+            )
+            result.contents.append(contents)
             
+        elif resource_type == "material":
+            data = execute_in_main_thread(extract_material_data, resource_id)
+            if "error" in data:
+                logger.error(f"获取材质数据时出错: {data['error']}")
+                # 创建带有错误信息的文本内容
+                contents = create_text_resource_contents(
+                    uri=f"blender://material/{resource_id}",
+                    text=json.dumps({"error": data["error"]}),
+                    mime_type="application/json"
+                )
+                result.contents.append(contents)
+                return result.to_dict()
+                
+            # 创建带有材质数据的文本内容
+            contents = create_text_resource_contents(
+                uri=f"blender://material/{resource_id}",
+                text=json.dumps(data),
+                mime_type="application/json"
+            )
+            result.contents.append(contents)
+            
+        elif resource_type == "light":
+            data = execute_in_main_thread(extract_light_data, resource_id)
+            if "error" in data:
+                logger.error(f"获取灯光数据时出错: {data['error']}")
+                # 创建带有错误信息的文本内容
+                contents = create_text_resource_contents(
+                    uri=f"blender://light/{resource_id}",
+                    text=json.dumps({"error": data["error"]}),
+                    mime_type="application/json"
+                )
+                result.contents.append(contents)
+                return result.to_dict()
+                
+            # 创建带有灯光数据的文本内容
+            contents = create_text_resource_contents(
+                uri=f"blender://light/{resource_id}",
+                text=json.dumps(data),
+                mime_type="application/json"
+            )
+            result.contents.append(contents)
+            
+        elif resource_type == "camera":
+            data = execute_in_main_thread(extract_camera_data, resource_id)
+            if "error" in data:
+                logger.error(f"获取相机数据时出错: {data['error']}")
+                # 创建带有错误信息的文本内容
+                contents = create_text_resource_contents(
+                    uri=f"blender://camera/{resource_id}",
+                    text=json.dumps({"error": data["error"]}),
+                    mime_type="application/json"
+                )
+                result.contents.append(contents)
+                return result.to_dict()
+                
+            # 创建带有相机数据的文本内容
+            contents = create_text_resource_contents(
+                uri=f"blender://camera/{resource_id}",
+                text=json.dumps(data),
+                mime_type="application/json"
+            )
+            result.contents.append(contents)
+            
+        elif resource_type == "scene":
+            data = execute_in_main_thread(extract_scene_data, resource_id)
+            if "error" in data:
+                logger.error(f"获取场景数据时出错: {data['error']}")
+                # 创建带有错误信息的文本内容
+                contents = create_text_resource_contents(
+                    uri=f"blender://scene/{resource_id}",
+                    text=json.dumps({"error": data["error"]}),
+                    mime_type="application/json"
+                )
+                result.contents.append(contents)
+                return result.to_dict()
+                
+            # 创建带有场景数据的文本内容
+            contents = create_text_resource_contents(
+                uri=f"blender://scene/{resource_id}",
+                text=json.dumps(data),
+                mime_type="application/json"
+            )
+            result.contents.append(contents)
+            
+        else:
+            logger.error(f"不支持的资源类型: {resource_type}")
+            # 创建带有错误信息的文本内容
+            contents = create_text_resource_contents(
+                uri=f"blender://{resource_type}/{resource_id}",
+                text=json.dumps({"error": f"不支持的资源类型: {resource_type}"}),
+                mime_type="application/json"
+            )
+            result.contents.append(contents)
+            
+        return result.to_dict()
+        
     except Exception as e:
-        error_msg = f"读取资源时出错: {str(e)}"
-        logger.error(error_msg)
         import traceback
+        logger.error(f"处理read_resource请求时出错: {str(e)}")
         logger.error(traceback.format_exc())
-        return {"error": error_msg}
+        
+        # 创建带有错误信息的文本内容
+        contents = create_text_resource_contents(
+            uri=f"blender://{resource_type}/{resource_id}",
+            text=json.dumps({"error": str(e)}),
+            mime_type="application/json"
+        )
+        result.contents.append(contents)
+        return result.to_dict()
 
 def extract_mesh_data(mesh_name):
     """提取网格对象数据"""

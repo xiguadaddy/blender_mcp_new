@@ -6,17 +6,12 @@ import sys
 import os
 import threading
 import time
-import logging
 import tempfile
+from ..logger import get_logger
 
 # 设置日志
-logger = logging.getLogger("BlenderMCP.Operators")
-# 配置日志格式
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-# 添加控制台处理器
-console_handler = logging.StreamHandler()
-console_handler.setFormatter(formatter)
-logger.addHandler(console_handler)
+logger = get_logger("BlenderMCP.Operators")
+
 
 # 全局变量
 _mcp_server_running = False
@@ -213,55 +208,74 @@ class MCP_OT_CreateTestObject(bpy.types.Operator):
         """模态执行函数，处理异步操作"""
         if event.type == 'TIMER':
             if self._stage == "start" and not self._is_running:
-                # 开始异步执行创建对象
+                # 第一阶段：创建立方体
+                self.report({'INFO'}, "创建测试对象 - 第一阶段: 创建立方体")
+                self._stage = "create_object"
                 self._is_running = True
+                
+                # 执行创建对象任务
                 self.execute_async_task("create_object")
-                return {'RUNNING_MODAL'}
                 
             elif self._stage == "create_object" and self._result is not None:
-                # 创建对象完成，检查结果
-                result = self._result
-                self._result = None
-                
-                if "error" in result:
-                    error_msg = f"创建测试对象失败: {result['error']}"
-                    print(f"错误: {error_msg}")
-                    self.report({'ERROR'}, error_msg)
+                # 处理创建对象结果
+                if "error" in self._result:
+                    self.report({'ERROR'}, f"创建对象失败: {self._result['error']}")
                     self.cleanup()
                     return {'CANCELLED'}
                 
-                # 保存对象名称用于设置材质
-                self._object_name = result["object_name"]
-                print(f"创建对象成功: {self._object_name}")
-                
-                # 进入下一阶段：设置材质
-                self._stage = "set_material"
-                self._is_running = False
-                return {'RUNNING_MODAL'}
+                # 成功创建对象，提取对象名称
+                if "object_name" in self._result:
+                    obj_name = self._result["object_name"]
+                    self._stage = "set_material"
+                    self._is_running = False
+                    self._result = None
+                    
+                    self.report({'INFO'}, f"对象创建成功: {obj_name}")
+                    self.report({'INFO'}, "创建测试对象 - 第二阶段: 设置材质")
+                else:
+                    # 旧格式兼容或错误处理
+                    text_content = ""
+                    if "content" in self._result and len(self._result["content"]) > 0:
+                        content = self._result["content"][0]
+                        if "text" in content:
+                            text_content = content["text"]
+                    
+                    self.report({'INFO'}, f"对象创建完成: {text_content}")
+                    self.cleanup()
+                    return {'FINISHED'}
                 
             elif self._stage == "set_material" and not self._is_running:
-                # 开始异步执行设置材质
-                self._is_running = True
-                self.execute_async_task("set_material")
-                return {'RUNNING_MODAL'}
+                # 执行设置材质任务
+                obj = context.active_object
+                if obj:
+                    self._is_running = True
+                    self.execute_async_task("set_material", {"object_name": obj.name})
+                else:
+                    self.report({'WARNING'}, "没有活动对象，跳过材质设置")
+                    self.cleanup()
+                    return {'FINISHED'}
                 
             elif self._stage == "set_material" and self._result is not None:
-                # 设置材质完成，结束操作
-                material_result = self._result
-                self._result = None
+                # 处理设置材质结果
+                if "error" in self._result:
+                    self.report({'WARNING'}, f"设置材质警告: {self._result['error']}")
+                else:
+                    # 成功设置材质
+                    text_content = ""
+                    if "text" in self._result:
+                        text_content = self._result["text"]
+                    elif "content" in self._result and len(self._result["content"]) > 0:
+                        content = self._result["content"][0]
+                        if "text" in content:
+                            text_content = content["text"]
+                    
+                    self.report({'INFO'}, f"材质设置完成: {text_content}")
                 
-                if "error" in material_result:
-                    print(f"设置材质警告: {material_result['error']}")
-                    # 材质设置失败不影响整体结果，仍然返回成功
-                
-                success_msg = f"创建了测试对象: {self._object_name}"
-                print(f"成功: {success_msg}")
-                self.report({'INFO'}, success_msg)
-                
-                # 结束定时器和模态操作
+                # 完成所有操作
+                self._stage = "finish"
                 self.cleanup()
                 return {'FINISHED'}
-                
+        
         # 用户取消操作
         elif event.type in {'RIGHTMOUSE', 'ESC'}:
             self.cleanup()
@@ -270,44 +284,42 @@ class MCP_OT_CreateTestObject(bpy.types.Operator):
             
         return {'RUNNING_MODAL'}
         
-    def execute_async_task(self, task_type):
+    def execute_async_task(self, task_type, additional_params=None):
         """在后台线程中异步执行任务"""
-        import threading
         
         def run_task():
             try:
+                self._is_running = True
+                tools_handler = bpy.context.scene.mcp_tools_handler
+                
                 if task_type == "create_object":
-                    print("异步发送创建对象请求...")
-                    result = bpy.context.scene.mcp_tools_handler.execute_tool(
-                        "create_object", 
-                        {
-                            "object_type": "cube", 
-                            "size": 2.0, 
-                            "name": "MCP_Test_Cube",
-                            "location": [0, 0, 0]
-                        }
-                    )
-                    self._result = result
-                    self._stage = "create_object"  # 更新阶段
+                    # 创建立方体
+                    params = {
+                        "object_type": "cube", 
+                        "name": "MCP_Test_Cube",
+                        "size": 2.0,
+                        "location": [0, 0, 0]
+                    }
+                    result = tools_handler.execute_tool("create_object", params)
+                elif task_type == "set_material" and additional_params:
+                    # 设置红色材质
+                    params = {
+                        "object_name": additional_params["object_name"],
+                        "color": [1.0, 0.0, 0.0, 1.0]
+                    }
+                    result = tools_handler.execute_tool("set_material", params)
+                else:
+                    result = {"error": "未知任务类型"}
                     
-                elif task_type == "set_material":
-                    print("异步发送设置材质请求...")
-                    result = bpy.context.scene.mcp_tools_handler.execute_tool(
-                        "set_material", 
-                        {
-                            "object_name": self._object_name,
-                            "color": [1.0, 0.2, 0.2, 1.0],
-                            "metallic": 0.2,
-                            "roughness": 0.5
-                        }
-                    )
-                    self._result = result
-                    self._stage = "set_material"  # 更新阶段
+                # 保存结果
+                self._result = result
+                self._is_running = False
                     
             except Exception as e:
                 import traceback
                 traceback.print_exc()
                 self._result = {"error": str(e)}
+                self._is_running = False
                 
         # 创建并启动线程
         thread = threading.Thread(target=run_task)
@@ -320,15 +332,13 @@ class MCP_OT_CreateTestObject(bpy.types.Operator):
             print("开始创建测试对象（异步模式）...")
             
             # 检查服务器是否运行
-            if not get_server_running_status():
+            if not hasattr(bpy.types, "_mcp_server_running") or not bpy.types._mcp_server_running:
                 self.report({'ERROR'}, "MCP服务器未运行，请先启动服务器")
                 return {'CANCELLED'}
             
             # 检查工具处理器
             if not hasattr(context.scene, "mcp_tools_handler") or not context.scene.mcp_tools_handler:
-                error_msg = "工具处理器不可用，请手动停止并重新启动服务器"
-                print(f"错误: {error_msg}")
-                self.report({'ERROR'}, error_msg)
+                self.report({'ERROR'}, "MCP工具处理器不可用，请确保服务器已连接")
                 return {'CANCELLED'}
             
             # 启动模态定时器

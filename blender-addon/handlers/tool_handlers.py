@@ -6,28 +6,27 @@ from mathutils import Vector, Euler
 import threading
 import time
 import logging
+import json
 from ..utils import thread_utils
 import bmesh
 import mathutils
 import math
 import concurrent.futures
+from ..mcp_types import (
+    create_text_content,
+    create_image_content,
+    create_error_data,
+    CallToolResult,
+    TextContent,
+    Tool,
+    ListToolsResult,
+    ImageContent,
+    ErrorData
+)
+from ..logger import get_logger
 
-# 设置日志
-logger = logging.getLogger("BlenderMCP.Tools")
-# 配置日志格式
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-# 添加控制台处理器
-console_handler = logging.StreamHandler()
-console_handler.setFormatter(formatter)
-logger.addHandler(console_handler)
-
-# 添加文件处理器
-log_file = os.path.join(tempfile.gettempdir(), "blender_mcp_tools.log")
-file_handler = logging.FileHandler(log_file, mode='a')
-file_handler.setFormatter(formatter)
-logger.addHandler(file_handler)
-
-logger.setLevel(logging.DEBUG)
+# 获取日志器
+logger = get_logger("BlenderMCP.Tools")
 
 # 工具线程锁，确保线程安全
 _tool_lock = threading.Lock()
@@ -47,46 +46,158 @@ def execute_tool(tool_name, arguments):
     
     logger.info(f"执行工具: {tool_name}, 参数: {arguments}")
     
-    # 检查是否在主线程中执行
-    is_main_thread = threading.current_thread() is threading.main_thread()
-    logger.debug(f"执行工具 {tool_name} 在{'主' if is_main_thread else '后台'}线程")
+    # 创建工具结果对象
+    result = CallToolResult()
     
-    # 执行Python代码
-    if tool_name == "execute_python":
-        code = arguments.get("code", "")
-        if not code:
-            logger.warning("未提供Python代码")
-            return {"error": "未提供Python代码"}
-        return execute_python_tool(code)
-    
-    # 列出可用工具
-    elif tool_name == "list_tools":
-        logger.debug("调用list_tools函数")
-        return list_tools()
-    
-    # 获取所有注册的工具
-    tools = register_all_tools()
-    
-    # 在主线程中使用线程池执行，避免阻塞
-    if is_main_thread and tool_name not in ["list_tools", "execute_python"]:
-        logger.debug(f"检测到在主线程中调用工具{tool_name}，转移到后台线程执行")
+    try:
+        # 检查是否在主线程中执行
+        is_main_thread = threading.current_thread() is threading.main_thread()
+        logger.debug(f"执行工具 {tool_name} 在{'主' if is_main_thread else '后台'}线程")
         
-        # 使用线程池异步执行工具
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(_execute_tool_worker, tools, tool_name, arguments)
+        # 执行Python代码
+        if tool_name == "execute_python":
+            code = arguments.get("code", "")
+            if not code:
+                logger.warning("未提供Python代码")
+                # 创建错误内容
+                content = create_text_content("未提供Python代码")
+                result.content.append(content)
+                result.isError = True
+                return result.to_dict()
+                
+            tool_result = execute_python_tool(code)
             
-            try:
-                # 等待最多3秒
-                return future.result(timeout=3.0)
-            except concurrent.futures.TimeoutError:
-                logger.warning(f"工具{tool_name}执行超时（>3秒），返回超时错误")
-                return {"error": f"工具执行超时（>3秒）"}
-            except Exception as e:
-                logger.error(f"工具{tool_name}异步执行出错: {e}")
-                return {"error": f"工具执行错误: {e}"}
-    
-    # 在非主线程中直接执行
-    return _execute_tool_worker(tools, tool_name, arguments)
+            if isinstance(tool_result, dict) and "error" in tool_result:
+                # 创建错误内容
+                content = create_text_content(f"执行Python代码出错: {tool_result['error']}")
+                result.content.append(content)
+                result.isError = True
+            else:
+                # 处理可能的复杂返回结果
+                process_tool_result(tool_result, result)
+                
+            return result.to_dict()
+        
+        # 列出可用工具
+        elif tool_name == "list_tools":
+            logger.debug("调用list_tools函数")
+            return list_tools()
+        
+        # 获取所有注册的工具
+        tools = register_all_tools()
+        
+        # 在主线程中使用线程池执行，避免阻塞
+        if is_main_thread and tool_name not in ["list_tools", "execute_python"]:
+            logger.debug(f"检测到在主线程中调用工具{tool_name}，转移到后台线程执行")
+            
+            # 使用线程池异步执行工具
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(_execute_tool_worker, tools, tool_name, arguments)
+                
+                try:
+                    # 等待最多3秒
+                    tool_result = future.result(timeout=3.0)
+                    
+                    # 处理工具执行结果
+                    if isinstance(tool_result, dict) and "error" in tool_result:
+                        # 创建错误内容
+                        error_msg = f"工具执行错误: {tool_result['error']}"
+                        content = create_text_content(error_msg)
+                        result.content.append(content)
+                        result.isError = True
+                    else:
+                        # 处理工具结果
+                        process_tool_result(tool_result, result)
+                        
+                    return result.to_dict()
+                except concurrent.futures.TimeoutError:
+                    logger.warning(f"工具{tool_name}执行超时（>3秒），返回超时错误")
+                    # 创建超时错误内容
+                    content = create_text_content(f"工具执行超时（>3秒）")
+                    result.content.append(content)
+                    result.isError = True
+                    return result.to_dict()
+                except Exception as e:
+                    logger.error(f"工具{tool_name}异步执行出错: {e}")
+                    # 创建异步执行错误内容
+                    content = create_text_content(f"工具执行错误: {str(e)}")
+                    result.content.append(content)
+                    result.isError = True
+                    return result.to_dict()
+        
+        # 在非主线程中直接执行
+        tool_result = _execute_tool_worker(tools, tool_name, arguments)
+        
+        # 处理工具执行结果
+        if isinstance(tool_result, dict) and "error" in tool_result:
+            # 创建错误内容
+            error_msg = f"工具执行错误: {tool_result['error']}"
+            content = create_text_content(error_msg)
+            result.content.append(content)
+            result.isError = True
+        else:
+            # 处理工具结果
+            process_tool_result(tool_result, result)
+            
+        return result.to_dict()
+    except Exception as e:
+        import traceback
+        error_msg = f"执行工具时出错: {str(e)}"
+        logger.error(error_msg)
+        logger.error(traceback.format_exc())
+        
+        # 创建异常错误内容
+        content = create_text_content(error_msg)
+        result.content.append(content)
+        result.isError = True
+        return result.to_dict()
+
+# 添加处理工具结果的函数
+def process_tool_result(tool_result, result_obj):
+    """处理工具执行结果，转换为标准MCP类型"""
+    if tool_result is None:
+        # 空结果处理
+        content = create_text_content("工具执行成功，但没有返回结果")
+        result_obj.content.append(content)
+        return
+        
+    # 如果结果已经是MCP类型，直接添加
+    if isinstance(tool_result, (TextContent, ImageContent)):
+        result_obj.content.append(tool_result)
+        return
+        
+    # 处理列表结果
+    if isinstance(tool_result, list):
+        for item in tool_result:
+            process_tool_result(item, result_obj)
+        return
+        
+    # 处理字典结果
+    if isinstance(tool_result, dict):
+        # 检查是否包含图像数据
+        if "image_data" in tool_result and "mime_type" in tool_result:
+            # 创建图像内容
+            image_content = create_image_content(
+                tool_result["image_data"], 
+                tool_result["mime_type"]
+            )
+            result_obj.content.append(image_content)
+            return
+            
+        # 检查是否包含文本数据
+        if "text" in tool_result:
+            content = create_text_content(tool_result["text"])
+            result_obj.content.append(content)
+            return
+            
+        # 一般字典，转为文本
+        content = create_text_content(json.dumps(tool_result, indent=2))
+        result_obj.content.append(content)
+        return
+        
+    # 默认处理：转为文本
+    content = create_text_content(str(tool_result))
+    result_obj.content.append(content)
 
 def _execute_tool_worker(tools, tool_name, arguments):
     """在工作线程中执行工具（无需锁）"""
@@ -114,10 +225,11 @@ def execute_python_tool(code):
     """执行Python代码工具"""
     try:
         # 创建局部命名空间执行代码
-        namespace = {"bpy": bpy, "result": None}
+        namespace = {"bpy": bpy, "result": None, "create_text_content": create_text_content, 
+                    "create_image_content": create_image_content}
         exec(code, namespace)
         # 返回代码执行结果
-        return namespace.get("result", {"status": "success", "message": "代码执行成功，但未返回结果"})
+        return namespace.get("result", {"status": "success", "text": "代码执行成功，但未返回结果"})
     except Exception as e:
         return {"error": f"执行Python代码时出错: {str(e)}"}
 
@@ -150,6 +262,7 @@ def import_model(args):
             
             return {
                 "status": "success", 
+                "text": f"成功导入{len(imported_objects)}个对象",
                 "imported_objects": imported_objects,
                 "file_path": file_path
             }
@@ -216,6 +329,7 @@ def set_uv_mapping(args):
             
             return {
                 "status": "success",
+                "text": f"成功为对象 {object_name} 设置 {mapping_type} UV映射",
                 "object": object_name,
                 "mapping_type": mapping_type,
                 "scale": scale
@@ -232,38 +346,47 @@ def set_uv_mapping(args):
 
 
 def list_tools():
-    """获取所有可用工具列表的详细信息"""
-    logger.debug("获取工具列表")
+    """列出所有可用工具"""
+    from .tools import register_all_tools
+    
+    logger.debug("列出所有可用工具")
+    
+    # 创建工具列表结果
+    result = ListToolsResult()
     
     try:
-        from .tools import register_all_tools
+        # 获取所有工具
+        tools_dict = register_all_tools()
         
-        # 获取工具处理函数
-        tools_funcs = register_all_tools()
-        logger.debug(f"找到 {len(tools_funcs)} 个工具函数")
-        
-        # 预定义的工具信息
-        tools = [
-            {
-                "name": "create_object",
-                "description": "在Blender中创建一个对象",
-                "version": "1.0",
-                "input_schema": {
+        for tool_name, tool_func in tools_dict.items():
+            # 创建工具对象
+            tool = Tool()
+            tool.name = tool_name
+            
+            # 从文档字符串中提取描述
+            if tool_func.__doc__:
+                tool.description = tool_func.__doc__.strip()
+            else:
+                tool.description = f"Blender工具: {tool_name}"
+                
+            # 构建输入模式，为特定工具提供更详细的模式
+            if tool_name == "create_object":
+                tool.inputSchema = {
                     "type": "object",
                     "properties": {
                         "object_type": {
-                            "type": "string", 
-                            "enum": ["cube", "sphere", "cylinder", "plane", "cone", "torus"],
-                            "description": "要创建的对象类型"
-                        },
-                        "name": {
                             "type": "string",
-                            "description": "对象名称(可选)"
+                            "enum": ["cube", "sphere", "plane", "cylinder", "cone", "torus", "empty"],
+                            "description": "要创建的对象类型"
                         },
                         "location": {
                             "type": "array",
                             "items": {"type": "number"},
                             "description": "对象位置坐标 [x, y, z]"
+                        },
+                        "name": {
+                            "type": "string",
+                            "description": "对象名称"
                         },
                         "size": {
                             "type": "number",
@@ -272,44 +395,24 @@ def list_tools():
                     },
                     "required": ["object_type"]
                 }
-            },
-            {
-                "name": "set_material",
-                "description": "为对象设置材质",
-                "version": "1.0",
-                "input_schema": {
+            elif tool_name == "set_material":
+                tool.inputSchema = {
                     "type": "object",
                     "properties": {
-                        "object_name": {
-                            "type": "string",
-                            "description": "目标对象名称"
-                        },
-                        "material_name": {
-                            "type": "string",
-                            "description": "材质名称（如果不提供则自动生成）"
-                        },
+                        "object_name": {"type": "string", "description": "目标对象名称"},
+                        "material_name": {"type": "string", "description": "材质名称"},
                         "color": {
                             "type": "array",
                             "items": {"type": "number"},
-                            "description": "RGBA颜色值 [r, g, b, a]，或RGB颜色值 [r, g, b]"
+                            "description": "RGBA颜色值 [r, g, b, a]"
                         },
-                        "metallic": {
-                            "type": "number",
-                            "description": "金属度(0-1)"
-                        },
-                        "roughness": {
-                            "type": "number",
-                            "description": "粗糙度(0-1)"
-                        }
+                        "metallic": {"type": "number", "description": "金属度(0-1)"},
+                        "roughness": {"type": "number", "description": "粗糙度(0-1)"}
                     },
                     "required": ["object_name"]
                 }
-            },
-            {
-                "name": "add_light",
-                "description": "添加灯光到场景",
-                "version": "1.0",
-                "input_schema": {
+            elif tool_name == "add_light":
+                tool.inputSchema = {
                     "type": "object",
                     "properties": {
                         "light_type": {
@@ -317,148 +420,40 @@ def list_tools():
                             "enum": ["POINT", "SUN", "SPOT", "AREA"],
                             "description": "灯光类型"
                         },
-                        "name": {
-                            "type": "string",
-                            "description": "灯光名称(可选)"
-                        },
                         "location": {
                             "type": "array",
                             "items": {"type": "number"},
                             "description": "灯光位置 [x, y, z]"
                         },
+                        "name": {"type": "string", "description": "灯光名称"},
                         "color": {
                             "type": "array",
                             "items": {"type": "number"},
                             "description": "RGB颜色值 [r, g, b]"
                         },
-                        "energy": {
-                            "type": "number",
-                            "description": "灯光强度"
-                        }
+                        "energy": {"type": "number", "description": "灯光强度"}
                     },
                     "required": ["light_type"]
                 }
-            },
-            {
-                "name": "set_camera",
-                "description": "设置相机参数",
-                "version": "1.0",
-                "input_schema": {
+            else:
+                # 默认输入模式
+                tool.inputSchema = {
                     "type": "object",
-                    "properties": {
-                        "camera_name": {
-                            "type": "string",
-                            "description": "相机名称(如果不存在则创建)"
-                        },
-                        "location": {
-                            "type": "array",
-                            "items": {"type": "number"},
-                            "description": "相机位置 [x, y, z]"
-                        },
-                        "rotation": {
-                            "type": "array",
-                            "items": {"type": "number"},
-                            "description": "相机旋转 [x, y, z] (弧度)"
-                        },
-                        "target": {
-                            "type": "array",
-                            "items": {"type": "number"},
-                            "description": "相机目标点 [x, y, z]"
-                        },
-                        "lens": {
-                            "type": "number",
-                            "description": "镜头焦距(mm)"
-                        }
-                    },
-                    "required": ["camera_name"]
+                    "properties": {}
                 }
-            },
-            {
-                "name": "render_scene",
-                "description": "渲染当前场景",
-                "version": "1.0",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "output_path": {
-                            "type": "string",
-                            "description": "输出文件路径"
-                        },
-                        "resolution_x": {
-                            "type": "number",
-                            "description": "水平分辨率"
-                        },
-                        "resolution_y": {
-                            "type": "number",
-                            "description": "垂直分辨率"
-                        },
-                        "engine": {
-                            "type": "string",
-                            "enum": ["CYCLES", "BLENDER_EEVEE", "WORKBENCH"],
-                            "description": "渲染引擎"
-                        }
-                    },
-                    "required": ["output_path"]
-                }
-            },
-            {
-                "name": "execute_python",
-                "description": "执行Python代码",
-                "version": "1.0",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "code": {
-                            "type": "string",
-                            "description": "要执行的Python代码"
-                        }
-                    },
-                    "required": ["code"]
-                }
-            },
-            # 添加更多工具...
-        ]
-        
-        # 根据工具函数列表添加额外的工具
-        # 这样可以自动将新添加的工具函数转换为工具信息
-        for tool_name in tools_funcs:
-            # 跳过已存在的工具
-            if any(tool["name"] == tool_name for tool in tools):
-                continue
-                
-            # 创建新工具定义
-            tool_info = {
-                "name": tool_name,
-                "description": f"执行 {tool_name} 操作",
-                "version": "1.0",
-                # 默认模式，如果工具函数没有docstring，则假设它接受一个空字典
-                "input_schema": {
-                    "type": "object",
-                    "properties": {},
-                    "required": []
-                }
-            }
             
-            # 如果函数有文档字符串，尝试从中提取更多信息
-            func = tools_funcs[tool_name]
-            if func.__doc__:
-                # 尝试从docstring中提取描述信息
-                tool_info["description"] = func.__doc__.strip().split('\n')[0]
-                
-            tools.append(tool_info)
-        
-        # 记录工具列表
-        logger.info(f"返回 {len(tools)} 个工具定义")
-        for tool in tools:
-            logger.debug(f"工具: {tool['name']} - {tool['description']}")
+            # 添加到工具列表
+            result.tools.append(tool)
             
-        return tools
-        
+        logger.info(f"找到 {len(result.tools)} 个可用工具")
+        return result.to_dict()
     except Exception as e:
         import traceback
-        logger.error(f"获取工具列表时出错: {str(e)}")
+        logger.error(f"列出工具时出错: {str(e)}")
         logger.error(traceback.format_exc())
-        return []
+        
+        # 返回空的工具列表
+        return result.to_dict()
 
 # 添加工具处理器类，用于在场景中注册
 class MCPToolsHandler:
@@ -534,3 +529,4 @@ def update_tools_handler():
     # 确保全局实例存在
     register_tools_handler()
     logger.debug("已更新工具处理器")
+

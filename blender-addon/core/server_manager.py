@@ -1,11 +1,11 @@
 import bpy
 from ..ipc.server import start_ipc_server, stop_ipc_server
 import sys
-import logging
 import os
+from ..logger import get_logger
 
 # 设置日志
-logger = logging.getLogger("BlenderMCP.ServerManager")
+logger = get_logger("BlenderMCP.ServerManager")
 
 def start_server(socket_path, debug_mode=False):
     """启动MCP服务器

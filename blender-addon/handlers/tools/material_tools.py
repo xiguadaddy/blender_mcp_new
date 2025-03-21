@@ -5,12 +5,14 @@
 """
 
 import bpy
-import logging
 import traceback
+import json
 from ..tool_handlers import execute_in_main_thread
+from ...mcp_types import create_text_content, create_image_content
+from ...logger import get_logger
 
 # 设置日志
-logger = logging.getLogger("BlenderMCP.MaterialTools")
+logger = get_logger("BlenderMCP.MaterialTools")
 
 # 材质创建函数
 def set_material(args):
@@ -169,8 +171,10 @@ def set_material(args):
             # 强制视图更新
             bpy.context.view_layer.update()
             
+            color_str = "RGB({:.2f}, {:.2f}, {:.2f})".format(*color_with_alpha[:3]) if 'color_with_alpha' in locals() else "未指定"
             return {
                 "status": "success", 
+                "text": f"已为对象 '{object_name}' 设置材质 '{mat.name}' (颜色: {color_str})",
                 "material_name": mat.name,
                 "object_name": object_name,
                 "color": list(color_with_alpha) if 'color_with_alpha' in locals() else None,
@@ -397,6 +401,7 @@ def get_material_info(args):
             
             return {
                 "status": "success",
+                "text": f"获取材质 '{material_name}' 的信息",
                 "material_info": mat_info
             }
             
@@ -681,4 +686,4 @@ TOOLS = {
     
     # 删除类
     "delete_material": delete_material
-} 
+}

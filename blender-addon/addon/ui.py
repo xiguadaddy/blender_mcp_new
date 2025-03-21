@@ -1,29 +1,15 @@
 import bpy
 from bpy.types import Panel, Operator, PropertyGroup
 import sys
-import logging
 import os
 import tempfile
 from ..handlers import resource_handlers, tool_handlers
 from .operators import _mcp_server_running, get_server_running_status, set_server_running_status
 import time
+from ..logger import get_logger
 
 # 设置日志
-logger = logging.getLogger("BlenderMCP.UI")
-# 配置日志格式
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-# 添加控制台处理器
-console_handler = logging.StreamHandler()
-console_handler.setFormatter(formatter)
-logger.addHandler(console_handler)
-
-# 添加文件处理器
-log_file = os.path.join(tempfile.gettempdir(), "blender_mcp_ui.log")
-file_handler = logging.FileHandler(log_file, mode='a')
-file_handler.setFormatter(formatter)
-logger.addHandler(file_handler)
-
-logger.setLevel(logging.DEBUG)
+logger = get_logger("BlenderMCP.UI")
 
 # 全局变量
 _mcp_show_tools_list = True
@@ -376,7 +362,7 @@ def update_tools_list():
     
     try:
         logger.debug("开始更新工具列表")
-        tools = tool_handlers.list_tools()
+        tools = tool_handlers.list_tools().get("tools", [])
         
         if isinstance(tools, list):
             MCP_PT_Panel._tools_list = tools

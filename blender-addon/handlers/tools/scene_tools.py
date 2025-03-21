@@ -5,15 +5,16 @@
 """
 
 import bpy
-import logging
 import os
 import json
 import tempfile
 from pathlib import Path
 from ..tool_handlers import execute_in_main_thread
+from ...mcp_types import create_text_content, create_image_content
+from ...logger import get_logger
 
 # 设置日志
-logger = logging.getLogger("BlenderMCP.SceneTools")
+logger = get_logger("BlenderMCP.SceneTools")
 
 # 场景渲染函数
 def render_scene(args):
@@ -54,10 +55,8 @@ def render_scene(args):
             # 恢复设置
             scene.render.filepath = original_path
             
-            return {
-                "status": "success",
-                "output_path": output_path
-            }
+            message = f"成功渲染场景至 {output_path}"
+            return create_text_content(message)
         except Exception as e:
             error_msg = f"渲染场景时出错: {str(e)}"
             logger.error(error_msg)
@@ -298,6 +297,7 @@ def get_scene_info(args):
             
             return {
                 "status": "success",
+                "text": f"成功获取场景 '{scene.name}' 的信息",
                 "scene_info": scene_info
             }
             
@@ -366,8 +366,11 @@ def update_scene(args):
                     logger.warning(f"无效的渲染引擎: {render_engine}")
                     changes.append(f"无效的渲染引擎: {render_engine} (已忽略)")
             
+            changes_text = ", ".join(changes) if changes else "无变更"
+            
             return {
-                "status": "success",
+                "status": "success", 
+                "text": f"成功更新场景属性: {changes_text}",
                 "scene": scene.name,
                 "changes": changes
             }
@@ -398,7 +401,12 @@ def export_scene(args):
                 os.makedirs(output_dir, exist_ok=True)
             
             # 根据格式确定导出函数
-            result = {"status": "success", "format": file_format, "filepath": filepath}
+            result = {
+                "status": "success", 
+                "text": f"成功将场景导出为 {file_format} 格式至 {filepath}",
+                "format": file_format, 
+                "filepath": filepath
+            }
             
             if file_format == "FBX":
                 bpy.ops.export_scene.fbx(
@@ -652,4 +660,4 @@ TOOLS = {
     "create_collection": create_collection,
     "list_collections": list_collections,
     "delete_collection": delete_collection
-} 
+}

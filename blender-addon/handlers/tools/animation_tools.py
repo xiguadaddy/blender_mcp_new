@@ -5,11 +5,12 @@
 """
 
 import bpy
-import logging
 from ..tool_handlers import execute_in_main_thread
+from ...mcp_types import create_text_content, create_image_content
+from ...logger import get_logger
 
 # 设置日志
-logger = logging.getLogger("BlenderMCP.AnimationTools")
+logger = get_logger("BlenderMCP.AnimationTools")
 
 # ---------- 基础动画功能 ----------
 
@@ -32,6 +33,7 @@ def create_keyframe_animation(args):
 
             return {
                 "status": "success",
+                "text": f"已为对象 '{object_name}' 在第 {frame} 帧创建关键帧（属性: {property_path}）",
                 "object_name": object_name,
                 "property_path": property_path,
                 "frame": frame
@@ -139,11 +141,7 @@ def get_frame_range(args):
     def exec_func():
         try:
             scene = bpy.context.scene
-            return {
-                "status": "success",
-                "start_frame": scene.frame_start,
-                "end_frame": scene.frame_end
-            }
+            return create_text_content(f"当前动画范围: {scene.frame_start}-{scene.frame_end}")
         except Exception as e:
             logger.error(f"获取帧范围时出错: {str(e)}")
             return {"error": str(e)}
